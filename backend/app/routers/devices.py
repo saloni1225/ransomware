@@ -148,3 +148,12 @@ def get_trust_breakdown(device_id: str, db: Session = Depends(get_db), current_u
             "browser_risk": {"score": browser_val, "max": 10, "label": "Safe Browsing"}
         }
     }
+
+@router.get("/{device_id}/trust-score")
+def get_trust_score_v2(device_id: str, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """Phase 3: 6-component weighted trust scoring using the trust engine."""
+    from app.services.trust_engine import compute_trust_score
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
+    return compute_trust_score(db, device_id)

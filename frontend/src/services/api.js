@@ -155,5 +155,178 @@ export const api = {
   getExportReportUrl: () => {
     const token = localStorage.getItem('token');
     return `${API_BASE_URL}/reports/export-html?token=${token}`; // For opening in new window
-  }
+  },
+
+  // ── Phase 2: Malware ─────────────────────────────────────────────────────
+  triggerScan: async (deviceId) => {
+    const response = await fetch(`${API_BASE_URL}/malware/scan?device_id=${deviceId}`, {
+      method: 'POST', headers: getHeaders(),
+    });
+    if (!response.ok) throw new Error('Scan failed');
+    return response.json();
+  },
+
+  listScans: async (limit = 100) => {
+    const response = await fetch(`${API_BASE_URL}/malware/scans?limit=${limit}`, { headers: getHeaders() });
+    if (!response.ok) throw new Error('Failed to load scans');
+    return response.json();
+  },
+
+  quarantineFile: async (scanId) => {
+    const response = await fetch(`${API_BASE_URL}/malware/scans/${scanId}/quarantine`, {
+      method: 'PUT', headers: getHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to quarantine');
+    return response.json();
+  },
+
+  getMalwareStats: async () => {
+    const response = await fetch(`${API_BASE_URL}/malware/stats`, { headers: getHeaders() });
+    if (!response.ok) throw new Error('Failed to load malware stats');
+    return response.json();
+  },
+
+  // ── Phase 2: Network ─────────────────────────────────────────────────────
+  listConnections: async (limit = 100) => {
+    const response = await fetch(`${API_BASE_URL}/network/connections?limit=${limit}`, { headers: getHeaders() });
+    if (!response.ok) throw new Error('Failed to load connections');
+    return response.json();
+  },
+
+  simulateConnections: async () => {
+    const response = await fetch(`${API_BASE_URL}/network/simulate`, {
+      method: 'POST', headers: getHeaders(),
+    });
+    if (!response.ok) throw new Error('Simulation failed');
+    return response.json();
+  },
+
+  getNetworkStats: async () => {
+    const response = await fetch(`${API_BASE_URL}/network/stats`, { headers: getHeaders() });
+    if (!response.ok) throw new Error('Failed to load network stats');
+    return response.json();
+  },
+
+  // ── Phase 2: Wi-Fi ──────────────────────────────────────────────────────
+  listWifiNetworks: async () => {
+    const response = await fetch(`${API_BASE_URL}/wifi/networks`, { headers: getHeaders() });
+    if (!response.ok) throw new Error('Failed to load WiFi networks');
+    return response.json();
+  },
+
+  triggerWifiScan: async (deviceId) => {
+    const response = await fetch(`${API_BASE_URL}/wifi/scan?device_id=${deviceId}`, {
+      method: 'POST', headers: getHeaders(),
+    });
+    if (!response.ok) throw new Error('Wi-Fi scan failed');
+    return response.json();
+  },
+
+  getWifiStats: async () => {
+    const response = await fetch(`${API_BASE_URL}/wifi/stats`, { headers: getHeaders() });
+    if (!response.ok) throw new Error('Failed to load WiFi stats');
+    return response.json();
+  },
+
+  // ── Phase 2: Firewall ───────────────────────────────────────────────────
+  listFirewallRules: async () => {
+    const response = await fetch(`${API_BASE_URL}/firewall/rules`, { headers: getHeaders() });
+    if (!response.ok) throw new Error('Failed to load firewall rules');
+    return response.json();
+  },
+
+  createFirewallRule: async (rule) => {
+    const response = await fetch(`${API_BASE_URL}/firewall/rules`, {
+      method: 'POST', headers: getHeaders(), body: JSON.stringify(rule),
+    });
+    if (!response.ok) throw new Error('Failed to create rule');
+    return response.json();
+  },
+
+  toggleFirewallRule: async (ruleId) => {
+    const response = await fetch(`${API_BASE_URL}/firewall/rules/${ruleId}/toggle`, {
+      method: 'PUT', headers: getHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to toggle rule');
+    return response.json();
+  },
+
+  deleteFirewallRule: async (ruleId) => {
+    const response = await fetch(`${API_BASE_URL}/firewall/rules/${ruleId}`, {
+      method: 'DELETE', headers: getHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to delete rule');
+    return response.json();
+  },
+
+  getFirewallStats: async () => {
+    const response = await fetch(`${API_BASE_URL}/firewall/stats`, { headers: getHeaders() });
+    if (!response.ok) throw new Error('Failed to load firewall stats');
+    return response.json();
+  },
+
+  // ── Phase 3: Deception ──────────────────────────────────────────────────
+  listDeceptionAssets: async () => {
+    const response = await fetch(`${API_BASE_URL}/deception/assets`, { headers: getHeaders() });
+    if (!response.ok) throw new Error('Failed to load deception assets');
+    return response.json();
+  },
+
+  createDeceptionAsset: async (asset) => {
+    const response = await fetch(`${API_BASE_URL}/deception/assets`, {
+      method: 'POST', headers: getHeaders(), body: JSON.stringify(asset),
+    });
+    if (!response.ok) throw new Error('Failed to create asset');
+    return response.json();
+  },
+
+  triggerDeceptionAsset: async (assetId, deviceId, triggeredBy) => {
+    const response = await fetch(`${API_BASE_URL}/deception/trigger`, {
+      method: 'POST', headers: getHeaders(),
+      body: JSON.stringify({ asset_id: assetId, device_id: deviceId, triggered_by: triggeredBy }),
+    });
+    if (!response.ok) throw new Error('Failed to trigger asset');
+    return response.json();
+  },
+
+  toggleDeceptionAsset: async (assetId) => {
+    const response = await fetch(`${API_BASE_URL}/deception/assets/${assetId}/toggle`, {
+      method: 'PUT', headers: getHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to toggle asset');
+    return response.json();
+  },
+
+  getDeceptionStats: async () => {
+    const response = await fetch(`${API_BASE_URL}/deception/stats`, { headers: getHeaders() });
+    if (!response.ok) throw new Error('Failed to load deception stats');
+    return response.json();
+  },
+
+  // ── Phase 3: Privacy ────────────────────────────────────────────────────
+  listPrivacyEvents: async () => {
+    const response = await fetch(`${API_BASE_URL}/privacy/events`, { headers: getHeaders() });
+    if (!response.ok) throw new Error('Failed to load privacy events');
+    return response.json();
+  },
+
+  getPrivacyScore: async () => {
+    const response = await fetch(`${API_BASE_URL}/privacy/score`, { headers: getHeaders() });
+    if (!response.ok) throw new Error('Failed to load privacy score');
+    return response.json();
+  },
+
+  getPrivacyStats: async () => {
+    const response = await fetch(`${API_BASE_URL}/privacy/stats`, { headers: getHeaders() });
+    if (!response.ok) throw new Error('Failed to load privacy stats');
+    return response.json();
+  },
+
+  // ── Phase 3: Trust Score ────────────────────────────────────────────────
+  getDeviceTrustScore: async (deviceId) => {
+    const response = await fetch(`${API_BASE_URL}/devices/${deviceId}/trust-score`, { headers: getHeaders() });
+    if (!response.ok) throw new Error('Failed to load trust score');
+    return response.json();
+  },
 };
+
