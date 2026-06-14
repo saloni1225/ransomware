@@ -83,6 +83,26 @@ body {
   to { transform: rotate(360deg); }
 }
 
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.8); }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulseRed {
+  0% { box-shadow: 0 0 0 rgba(246,79,89,0); }
+  50% { box-shadow: 0 0 30px rgba(246,79,89,0.5); }
+  100% { box-shadow: 0 0 0 rgba(246,79,89,0); }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
 /* Layout Utilities */
 .app-container {
   display: flex;
@@ -94,9 +114,11 @@ body {
 
 .main-content {
   flex: 1;
-  padding: 30px;
+  padding: 0;
   margin-left: 260px; /* Sidebar width */
   min-width: 0; /* Prevents flex items from overflowing */
+  overflow-y: auto;
+  max-height: 100vh;
   animation: fadeIn 0.4s ease-out;
 }
 

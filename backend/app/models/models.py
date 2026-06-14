@@ -1,5 +1,5 @@
 import datetime
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, JSON, Float, BigInteger
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -80,3 +80,104 @@ class AttackStoryline(Base):
     storyline_data = Column(JSON, nullable=False) # JSON structured representation of process/attack chain
 
     threat_event = relationship("ThreatEvent", back_populates="storylines")
+
+# ─── Phase 2 Models ─────────────────────────────────────────────────────────
+
+class MalwareScan(Base):
+    __tablename__ = "malware_scans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(String, ForeignKey("devices.id"), nullable=False)
+    file_path = Column(String, nullable=False)
+    file_hash = Column(String, nullable=True)
+    file_size = Column(BigInteger, nullable=True)
+    status = Column(String, default="clean")  # clean, infected, quarantined, suspicious
+    threat_name = Column(String, nullable=True)
+    scan_engine = Column(String, default="AntiGravity Shield v2.1")
+    scan_time = Column(DateTime, default=datetime.datetime.utcnow)
+
+    device = relationship("Device", foreign_keys=[device_id])
+
+class NetworkConnection(Base):
+    __tablename__ = "network_connections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(String, ForeignKey("devices.id"), nullable=False)
+    remote_ip = Column(String, nullable=False)
+    remote_port = Column(Integer, nullable=True)
+    local_port = Column(Integer, nullable=True)
+    protocol = Column(String, default="TCP")  # TCP, UDP, ICMP
+    process_name = Column(String, nullable=True)
+    bytes_sent = Column(BigInteger, default=0)
+    bytes_recv = Column(BigInteger, default=0)
+    status = Column(String, default="normal")  # normal, suspicious, blocked, c2
+    country = Column(String, nullable=True)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+
+    device = relationship("Device", foreign_keys=[device_id])
+
+class WiFiNetwork(Base):
+    __tablename__ = "wifi_networks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(String, ForeignKey("devices.id"), nullable=False)
+    ssid = Column(String, nullable=False)
+    bssid = Column(String, nullable=True)
+    signal_strength = Column(Integer, default=-70)  # dBm
+    channel = Column(Integer, nullable=True)
+    security_type = Column(String, default="WPA2")  # Open, WEP, WPA, WPA2, WPA3
+    frequency = Column(Float, nullable=True)  # GHz
+    risk_level = Column(String, default="low")  # low, medium, high, critical
+    is_connected = Column(Boolean, default=False)
+    is_evil_twin = Column(Boolean, default=False)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+
+    device = relationship("Device", foreign_keys=[device_id])
+
+class FirewallRule(Base):
+    __tablename__ = "firewall_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(String, nullable=True)  # null = global rule
+    rule_name = Column(String, nullable=False)
+    direction = Column(String, default="inbound")  # inbound, outbound, both
+    action = Column(String, default="block")  # allow, block
+    protocol = Column(String, default="TCP")  # TCP, UDP, ICMP, Any
+    port = Column(String, nullable=True)  # e.g. "80", "443", "1-1024", "any"
+    remote_ip = Column(String, nullable=True)  # IP or CIDR or "any"
+    is_active = Column(Boolean, default=True)
+    priority = Column(Integer, default=100)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    last_triggered = Column(DateTime, nullable=True)
+    hit_count = Column(Integer, default=0)
+
+# ─── Phase 3 Models ─────────────────────────────────────────────────────────
+
+class DeceptionAsset(Base):
+    __tablename__ = "deception_assets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    asset_name = Column(String, nullable=False)
+    asset_type = Column(String, default="file")  # file, credential, registry, network_share
+    path = Column(String, nullable=True)
+    description = Column(String, nullable=True)
+    is_active = Column(Boolean, default=True)
+    is_triggered = Column(Boolean, default=False)
+    trigger_count = Column(Integer, default=0)
+    last_triggered = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class PrivacyEvent(Base):
+    __tablename__ = "privacy_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(String, ForeignKey("devices.id"), nullable=True)
+    event_type = Column(String, nullable=False)  # exfiltration, data_access, policy_violation, leak_attempt
+    data_category = Column(String, nullable=False)  # PII, credentials, financial, health, intellectual_property
+    severity = Column(String, default="medium")  # low, medium, high, critical
+    details = Column(JSON, nullable=True)
+    is_blocked = Column(Boolean, default=False)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+
+    device = relationship("Device", foreign_keys=[device_id])
+

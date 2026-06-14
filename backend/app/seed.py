@@ -1,6 +1,10 @@
 import datetime
 from app.database import engine, SessionLocal, Base
-from app.models import User, Device, ThreatLog, ThreatEvent, AIExplanation, AttackStoryline
+from app.models import (
+    User, Device, ThreatLog, ThreatEvent, AIExplanation, AttackStoryline,
+    MalwareScan, NetworkConnection, WiFiNetwork, FirewallRule,
+    DeceptionAsset, PrivacyEvent
+)
 from app.services.auth_service import hash_password
 from app.services.ai_service import generate_ai_explanation
 from app.services.correlation_engine import generate_attack_storyline
@@ -154,7 +158,96 @@ def seed_db():
             generate_attack_storyline(db, ev)
             
         print("Generated AI Explanations & Attack Storylines successfully.")
-        print("Database seeding completed.")
+
+        # 6. Seed Firewall Rules
+        fw_rules = [
+            FirewallRule(rule_name="Block Meterpreter (4444)", direction="inbound", action="block", protocol="TCP", port="4444", remote_ip="any", is_active=True, priority=10, hit_count=17),
+            FirewallRule(rule_name="Block IRC Botnet (6667)", direction="both", action="block", protocol="TCP", port="6667", remote_ip="any", is_active=True, priority=11, hit_count=5),
+            FirewallRule(rule_name="Block Tor (9001/9050)", direction="outbound", action="block", protocol="TCP", port="9001", remote_ip="any", is_active=True, priority=12, hit_count=3),
+            FirewallRule(rule_name="Block SMB Lateral Movement", direction="inbound", action="block", protocol="TCP", port="445", remote_ip="any", is_active=True, priority=20, hit_count=42),
+            FirewallRule(rule_name="Allow HTTPS Outbound", direction="outbound", action="allow", protocol="TCP", port="443", remote_ip="any", is_active=True, priority=50, hit_count=2048),
+            FirewallRule(rule_name="Allow DNS", direction="outbound", action="allow", protocol="UDP", port="53", remote_ip="8.8.8.8", is_active=True, priority=51, hit_count=5820),
+            FirewallRule(rule_name="Block RDP External", direction="inbound", action="block", protocol="TCP", port="3389", remote_ip="any", is_active=True, priority=15, hit_count=128),
+            FirewallRule(rule_name="Block C2 Range 185.220.101.0/24", direction="both", action="block", protocol="Any", port="any", remote_ip="185.220.101.0/24", is_active=True, priority=5, hit_count=8),
+            FirewallRule(rule_name="Allow HTTP (Legacy Apps)", direction="outbound", action="allow", protocol="TCP", port="80", remote_ip="any", is_active=False, priority=60, hit_count=0),
+            FirewallRule(rule_name="Block Back Orifice (31337)", direction="inbound", action="block", protocol="TCP", port="31337", remote_ip="any", is_active=True, priority=8, hit_count=1),
+        ]
+        for rule in fw_rules:
+            rule.last_triggered = datetime.datetime.utcnow() - datetime.timedelta(hours=rule.hit_count % 48) if rule.hit_count > 0 else None
+        db.add_all(fw_rules)
+        db.commit()
+        print("Seeded firewall rules.")
+
+        # 7. Seed Deception Assets
+        decoys = [
+            DeceptionAsset(asset_name="salary_Q4_2024.xlsx", asset_type="file", path="C:\\Users\\Admin\\Documents\\salary_Q4_2024.xlsx", description="Decoy salary spreadsheet", is_active=True, is_triggered=True, trigger_count=3, last_triggered=datetime.datetime.utcnow() - datetime.timedelta(hours=2)),
+            DeceptionAsset(asset_name="employee_passwords.txt", asset_type="file", path="C:\\Users\\Admin\\Desktop\\employee_passwords.txt", description="Decoy credential file", is_active=True, is_triggered=False, trigger_count=0),
+            DeceptionAsset(asset_name="backup_admin", asset_type="credential", path="Active Directory > backup_admin", description="Honeypot AD account", is_active=True, is_triggered=True, trigger_count=1, last_triggered=datetime.datetime.utcnow() - datetime.timedelta(days=1)),
+            DeceptionAsset(asset_name="HKLM\\Software\\Vault\\MasterKey", asset_type="registry", path="HKLM\\Software\\Vault\\MasterKey", description="Fake registry credential store", is_active=True, is_triggered=False, trigger_count=0),
+            DeceptionAsset(asset_name="\\\\FILESERVER\\HR_Private", asset_type="network_share", path="\\\\FILESERVER\\HR_Private", description="Decoy HR network share", is_active=True, is_triggered=False, trigger_count=0),
+            DeceptionAsset(asset_name="aws_keys_backup.env", asset_type="file", path="C:\\Users\\Admin\\Documents\\aws_keys_backup.env", description="Fake AWS credential file", is_active=True, is_triggered=False, trigger_count=0),
+        ]
+        db.add_all(decoys)
+        db.commit()
+        print("Seeded deception assets.")
+
+        # 8. Seed Privacy Events
+        privacy_evs = [
+            PrivacyEvent(device_id="win10-office-pc", event_type="exfiltration", data_category="credentials", severity="critical", is_blocked=True, details={"destination": "185.220.101.45", "bytes": 4096, "process": "powershell.exe"}, timestamp=datetime.datetime.utcnow() - datetime.timedelta(hours=1)),
+            PrivacyEvent(device_id="macbook-m2-dev", event_type="data_access", data_category="PII", severity="high", is_blocked=False, details={"file": "customer_records.xlsx", "user": "dev_user"}, timestamp=datetime.datetime.utcnow() - datetime.timedelta(hours=3)),
+            PrivacyEvent(device_id="win10-office-pc", event_type="policy_violation", data_category="financial", severity="medium", is_blocked=True, details={"policy": "No external USB export", "action": "blocked"}, timestamp=datetime.datetime.utcnow() - datetime.timedelta(hours=5)),
+            PrivacyEvent(device_id="linux-prod-db", event_type="leak_attempt", data_category="health", severity="high", is_blocked=False, details={"table": "patient_records", "query_count": 15000}, timestamp=datetime.datetime.utcnow() - datetime.timedelta(days=1)),
+            PrivacyEvent(device_id="win10-office-pc", event_type="data_access", data_category="intellectual_property", severity="medium", is_blocked=True, details={"file": "source_code_backup.zip", "action": "attempted_copy"}, timestamp=datetime.datetime.utcnow() - datetime.timedelta(days=2)),
+            PrivacyEvent(device_id="macbook-m2-dev", event_type="exfiltration", data_category="credentials", severity="critical", is_blocked=False, details={"method": "email_attachment", "recipient": "external@suspicious.ru"}, timestamp=datetime.datetime.utcnow() - datetime.timedelta(hours=6)),
+        ]
+        db.add_all(privacy_evs)
+        db.commit()
+        print("Seeded privacy events.")
+
+        # 9. Seed Malware Scans
+        mal_scans = [
+            MalwareScan(device_id="win10-office-pc", file_path="C:\\Users\\Admin\\Downloads\\invoice_2024.pdf.exe", file_hash="44d88612fea8a8f36de82e1278abb02f", file_size=45230, status="infected", threat_name="EICAR-Test-File"),
+            MalwareScan(device_id="win10-office-pc", file_path="C:\\Windows\\Temp\\updater.vbs", file_hash="eccbc87e4b5ce2fe28308fd9f2a7baf3", file_size=8192, status="infected", threat_name="Worm.Emotet.B"),
+            MalwareScan(device_id="win10-office-pc", file_path="C:\\Program Files\\Office\\Word.exe", file_hash="abc123clean", file_size=14000000, status="clean", threat_name=None),
+            MalwareScan(device_id="win10-office-pc", file_path="C:\\Windows\\System32\\svchost.exe", file_hash="def456clean", file_size=98304, status="clean", threat_name=None),
+            MalwareScan(device_id="macbook-m2-dev", file_path="/Users/dev/Downloads/crack_v3.exe", file_hash="c4ca4238a0b923820dcc509a6f75849b", file_size=2456780, status="quarantined", threat_name="Backdoor.Cobalt.Strike"),
+            MalwareScan(device_id="macbook-m2-dev", file_path="/Applications/Chrome.app", file_hash="aaa111clean", file_size=220000000, status="clean", threat_name=None),
+            MalwareScan(device_id="linux-prod-db", file_path="/tmp/miner_worker", file_hash="6512bd43d9caa6e02c990b0a82652dca", file_size=789456, status="infected", threat_name="Miner.XMRig.Cryptojack"),
+            MalwareScan(device_id="linux-prod-db", file_path="/usr/bin/bash", file_hash="bbb222clean", file_size=1232896, status="clean", threat_name=None),
+            MalwareScan(device_id="win10-office-pc", file_path="C:\\Users\\Admin\\AppData\\Roaming\\startup.vbs", file_hash="ccc333susp", file_size=4096, status="suspicious", threat_name="Heuristic.HighEntropy.Script-based Dropper"),
+        ]
+        db.add_all(mal_scans)
+        db.commit()
+        print("Seeded malware scans.")
+
+        # 10. Seed Network Connections
+        net_conns = [
+            NetworkConnection(device_id="win10-office-pc", remote_ip="185.220.101.45", remote_port=443, protocol="TCP", process_name="svchost.exe", bytes_sent=45230, bytes_recv=12800, status="c2", country="Germany"),
+            NetworkConnection(device_id="win10-office-pc", remote_ip="8.8.8.8", remote_port=53, protocol="UDP", process_name="chrome.exe", bytes_sent=256, bytes_recv=512, status="normal", country="United States"),
+            NetworkConnection(device_id="win10-office-pc", remote_ip="91.92.128.77", remote_port=4444, protocol="TCP", process_name="powershell.exe", bytes_sent=8920, bytes_recv=34500, status="suspicious", country="Ukraine"),
+            NetworkConnection(device_id="macbook-m2-dev", remote_ip="142.250.185.78", remote_port=443, protocol="TCP", process_name="chrome", bytes_sent=15200, bytes_recv=98400, status="normal", country="United States"),
+            NetworkConnection(device_id="macbook-m2-dev", remote_ip="45.33.32.156", remote_port=6667, protocol="TCP", process_name="backdoor.exe", bytes_sent=890, bytes_recv=4500, status="c2", country="Netherlands"),
+            NetworkConnection(device_id="linux-prod-db", remote_ip="198.54.117.88", remote_port=9050, protocol="TCP", process_name="tor", bytes_sent=55000, bytes_recv=120000, status="suspicious", country="United States"),
+            NetworkConnection(device_id="linux-prod-db", remote_ip="1.1.1.1", remote_port=53, protocol="UDP", process_name="systemd-resolved", bytes_sent=128, bytes_recv=256, status="normal", country="Australia"),
+        ]
+        db.add_all(net_conns)
+        db.commit()
+        print("Seeded network connections.")
+
+        # 11. Seed Wi-Fi Networks
+        wifi_nets = [
+            WiFiNetwork(device_id="win10-office-pc", ssid="CorporateWifi", bssid="AA:BB:CC:DD:EE:04", signal_strength=-55, channel=11, security_type="WPA2-Enterprise", frequency=2.4, risk_level="low", is_connected=True, is_evil_twin=False),
+            WiFiNetwork(device_id="win10-office-pc", ssid="FREE_WIFI_AIRPORT", bssid="AA:BB:CC:DD:EE:03", signal_strength=-70, channel=1, security_type="Open", frequency=2.4, risk_level="high", is_connected=False, is_evil_twin=False),
+            WiFiNetwork(device_id="win10-office-pc", ssid="HomeNetwork_5G", bssid="FF:EE:DD:CC:BB:05", signal_strength=-58, channel=36, security_type="WPA2", frequency=5.0, risk_level="critical", is_connected=False, is_evil_twin=True),
+            WiFiNetwork(device_id="macbook-m2-dev", ssid="HomeNetwork_5G", bssid="AA:BB:CC:DD:EE:01", signal_strength=-45, channel=36, security_type="WPA3", frequency=5.0, risk_level="low", is_connected=True, is_evil_twin=False),
+            WiFiNetwork(device_id="macbook-m2-dev", ssid="D-Link_OLD", bssid="AA:BB:CC:DD:EE:08", signal_strength=-82, channel=11, security_type="WEP", frequency=2.4, risk_level="high", is_connected=False, is_evil_twin=False),
+            WiFiNetwork(device_id="linux-prod-db", ssid="ServerRoom_5G", bssid="CC:DD:EE:FF:00:11", signal_strength=-35, channel=100, security_type="WPA3", frequency=5.0, risk_level="low", is_connected=True, is_evil_twin=False),
+        ]
+        db.add_all(wifi_nets)
+        db.commit()
+        print("Seeded Wi-Fi networks.")
+
+        print("\n[OK] Database seeding completed (Phase 1 + Phase 2 + Phase 3).")
         
     except Exception as e:
         db.rollback()

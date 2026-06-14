@@ -6,6 +6,14 @@ import DashboardOverview from './components/DashboardOverview';
 import ThreatCenter from './components/ThreatCenter';
 import DeviceTrust from './components/DeviceTrust';
 import Reports from './components/Reports';
+// Phase 2
+import MalwareScan from './components/MalwareScan';
+import NetworkMonitor from './components/NetworkMonitor';
+import WiFiScanner from './components/WiFiScanner';
+import FirewallModule from './components/FirewallModule';
+// Phase 3
+import DeceptionEngine from './components/DeceptionEngine';
+import PrivacyDashboard from './components/PrivacyDashboard';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(api.isAuthenticated());
@@ -91,6 +99,7 @@ export default function App() {
 
       {/* Main Workspace Frame */}
       <div className="main-content">
+        {/* Phase 1 Tabs */}
         {activeTab === 'dashboard' && (
           <DashboardOverview 
             summary={summary}
@@ -107,14 +116,21 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'devices' && (
-          <DeviceTrust />
-        )}
+        {activeTab === 'devices' && <DeviceTrust />}
 
-        {activeTab === 'reports' && (
-          <Reports />
-        )}
+        {activeTab === 'reports' && <Reports />}
+
+        {/* Phase 2 Tabs */}
+        {activeTab === 'malware' && <MalwareScan />}
+        {activeTab === 'network' && <NetworkMonitor />}
+        {activeTab === 'wifi' && <WiFiScanner />}
+        {activeTab === 'firewall' && <FirewallModule />}
+
+        {/* Phase 3 Tabs */}
+        {activeTab === 'deception' && <DeceptionEngine />}
+        {activeTab === 'privacy' && <PrivacyDashboard />}
       </div>
     </div>
   );
 }
+

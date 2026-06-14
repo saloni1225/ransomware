@@ -5,15 +5,42 @@ import {
   AlertOctagon, 
   Smartphone, 
   FileSpreadsheet, 
-  LogOut 
+  LogOut,
+  Bug,
+  Activity,
+  Wifi,
+  ShieldCheck,
+  Crosshair,
+  Lock,
 } from 'lucide-react';
 
 export default function Navbar({ activeTab, setActiveTab, handleLogout, userEmail }) {
-  const navItems = [
-    { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard },
-    { id: 'threats', name: 'Threat Center', icon: AlertOctagon },
-    { id: 'devices', name: 'Device Trust', icon: Smartphone },
-    { id: 'reports', name: 'Reports', icon: FileSpreadsheet },
+  const navSections = [
+    {
+      label: 'Core',
+      items: [
+        { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard },
+        { id: 'threats', name: 'Threat Center', icon: AlertOctagon },
+        { id: 'devices', name: 'Device Trust', icon: Smartphone },
+        { id: 'reports', name: 'Reports', icon: FileSpreadsheet },
+      ]
+    },
+    {
+      label: 'Phase 2 — Protection',
+      items: [
+        { id: 'malware', name: 'Malware Scan', icon: Bug },
+        { id: 'network', name: 'Network Monitor', icon: Activity },
+        { id: 'wifi', name: 'Wi-Fi Scanner', icon: Wifi },
+        { id: 'firewall', name: 'Firewall', icon: ShieldCheck },
+      ]
+    },
+    {
+      label: 'Phase 3 — Intelligence',
+      items: [
+        { id: 'deception', name: 'Deception Engine', icon: Crosshair },
+        { id: 'privacy', name: 'Privacy', icon: Lock },
+      ]
+    },
   ];
 
   return (
@@ -69,8 +96,15 @@ export default function Navbar({ activeTab, setActiveTab, handleLogout, userEmai
       </div>
 
       {/* Nav List */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
-        {navItems.map((item) => {
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, overflowY: 'auto', marginRight: '-4px', paddingRight: '4px' }}>
+        {navSections.map((section) => (
+          <div key={section.label} style={{ marginBottom: '8px' }}>
+            <div style={{
+              fontSize: '9px', fontWeight: 800, color: 'var(--text-muted)',
+              textTransform: 'uppercase', letterSpacing: '0.1em',
+              padding: '4px 16px 6px',
+            }}>{section.label}</div>
+            {section.items.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
           return (
@@ -80,26 +114,29 @@ export default function Navbar({ activeTab, setActiveTab, handleLogout, userEmai
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '14px',
-                padding: '12px 16px',
+                gap: '12px',
+                padding: '9px 16px',
                 borderRadius: '8px',
                 border: 'none',
                 background: isActive ? 'rgba(79, 172, 254, 0.08)' : 'transparent',
                 color: isActive ? 'var(--cyan)' : 'var(--text-secondary)',
                 fontFamily: 'var(--font-primary)',
-                fontSize: '15px',
+                fontSize: '13px',
                 fontWeight: isActive ? 600 : 500,
                 textAlign: 'left',
                 cursor: 'pointer',
                 transition: 'var(--transition)',
                 boxShadow: isActive ? 'inset 0 0 0 1px rgba(0, 242, 254, 0.15)' : 'none',
+                width: '100%',
               }}
             >
-              <Icon size={20} strokeWidth={isActive ? 2.2 : 1.8} />
+              <Icon size={16} strokeWidth={isActive ? 2.2 : 1.8} />
               {item.name}
             </button>
           );
         })}
+          </div>
+        ))}
       </div>
 
       {/* User Session Footer */}
