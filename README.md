@@ -323,7 +323,7 @@ Dashboard Notification
 ## Clone Repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/anmoliot/ransomware-defense-system.git
 cd ransomware-defense
 ```
 
