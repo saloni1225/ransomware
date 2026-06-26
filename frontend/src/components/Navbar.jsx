@@ -12,6 +12,9 @@ import {
   ShieldCheck,
   Crosshair,
   Lock,
+  Settings,
+  RotateCcw,
+  Globe,
 } from 'lucide-react';
 
 export default function Navbar({ activeTab, setActiveTab, handleLogout, userEmail }) {
@@ -39,6 +42,19 @@ export default function Navbar({ activeTab, setActiveTab, handleLogout, userEmai
       items: [
         { id: 'deception', name: 'Deception Engine', icon: Crosshair },
         { id: 'privacy', name: 'Privacy', icon: Lock },
+        { id: 'browser', name: 'Browser Protection', icon: Globe },
+      ]
+    },
+    {
+      label: 'Incident Response',
+      items: [
+        { id: 'recovery', name: 'Recovery & Rollback', icon: RotateCcw },
+      ]
+    },
+    {
+      label: 'System',
+      items: [
+        { id: 'settings', name: 'Settings', icon: Settings },
       ]
     },
   ];

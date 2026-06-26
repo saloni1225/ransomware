@@ -81,20 +81,52 @@ export default function Reports() {
               </p>
             </div>
             
-            <button 
-              onClick={handleExport}
-              className="btn-primary"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '14px 28px',
-                fontSize: '15px'
-              }}
-            >
-              <ExternalLink size={18} />
-              Export PDF Report
-            </button>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button 
+                onClick={() => window.open(api.getExportReportPdfUrl(), '_blank')}
+                className="btn-primary"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '14px 28px',
+                  fontSize: '15px'
+                }}
+              >
+                <Download size={18} />
+                Download PDF
+              </button>
+
+              <button 
+                onClick={handleExport}
+                className="btn-secondary"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '14px 28px',
+                  fontSize: '15px'
+                }}
+              >
+                <ExternalLink size={18} />
+                Print HTML
+              </button>
+              
+              <button 
+                onClick={() => window.open(api.getExportReportCsvUrl(), '_blank')}
+                className="btn-secondary"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '14px 28px',
+                  fontSize: '15px'
+                }}
+              >
+                <Download size={18} />
+                Export CSV
+              </button>
+            </div>
           </div>
 
           {/* Quick Stats Grid */}

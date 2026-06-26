@@ -92,6 +92,7 @@ def device_heartbeat(device_id: str, heartbeat: DeviceHeartbeat, db: Session = D
 
 @router.get("/{device_id}/trust-breakdown")
 def get_trust_breakdown(device_id: str, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    from app.services.trust_engine import compute_trust_score
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(
@@ -99,55 +100,7 @@ def get_trust_breakdown(device_id: str, db: Session = Depends(get_db), current_u
             detail="Device not found"
         )
         
-    # Standard weighting details:
-    # OS Updates: 20%
-    # Firewall: 15%
-    # Wi-Fi Security: 10%
-    # USB Risk: 10%
-    # Malware Events: 20%
-    # Identity Risk: 15%
-    # Browser Risk: 10%
-    
-    firewall_val = 15 if device.firewall_status == "enabled" else 0
-    
-    active_threats = db.query(ThreatEvent).filter(ThreatEvent.device_id == device_id, ThreatEvent.status == "active").all()
-    
-    malware_val = 20
-    identity_val = 15
-    usb_val = 10
-    browser_val = 10
-    
-    for threat in active_threats:
-        if threat.category == "ransomware" or threat.category == "malware":
-            malware_val = max(0, malware_val - 10)
-        elif threat.category == "identity":
-            identity_val = max(0, identity_val - 10)
-        elif threat.category == "usb":
-            usb_val = max(0, usb_val - 5)
-        elif threat.category == "deception":
-            identity_val = max(0, identity_val - 5)
-            
-    # Mocking OS Updates & Wi-Fi score components for display
-    os_updates = 20 # Assume 100% updated in Phase 1
-    wifi_sec = 10  # Assume 100% secure in Phase 1
-    
-    calculated = os_updates + firewall_val + wifi_sec + usb_val + malware_val + identity_val + browser_val
-    device.trust_score = calculated
-    db.commit()
-    
-    return {
-        "device_id": device_id,
-        "overall_score": calculated,
-        "breakdown": {
-            "os_updates": {"score": os_updates, "max": 20, "label": "OS Updates (Latest)"},
-            "firewall_status": {"score": firewall_val, "max": 15, "label": f"Firewall status ({device.firewall_status})"},
-            "wifi_security": {"score": wifi_sec, "max": 10, "label": "Wi-Fi Security (WPA3)"},
-            "usb_risk": {"score": usb_val, "max": 10, "label": "USB Removable Control"},
-            "malware_events": {"score": malware_val, "max": 20, "label": "Malware & Ransomware logs"},
-            "identity_risk": {"score": identity_val, "max": 15, "label": "Identity & Credential safety"},
-            "browser_risk": {"score": browser_val, "max": 10, "label": "Safe Browsing"}
-        }
-    }
+    return compute_trust_score(db, device_id)
 
 @router.get("/{device_id}/trust-score")
 def get_trust_score_v2(device_id: str, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
@@ -157,3 +110,15 @@ def get_trust_score_v2(device_id: str, db: Session = Depends(get_db), current_us
     if not device:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
     return compute_trust_score(db, device_id)
+
+@router.delete("/{device_id}")
+def delete_device(device_id: str, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
+    db.delete(device)
+    db.commit()
+    return {"detail": "Device deleted successfully"}
+

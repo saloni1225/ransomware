@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
-from app.routers import auth, devices, threats, reports, malware, network, wifi, firewall, deception, privacy
+from app.routers import auth, devices, threats, reports, malware, network, wifi, firewall, deception, privacy, recovery, browser, behavior
 from app.config import settings
 
 # Create database tables automatically (including new Phase 2 & 3 tables)
@@ -22,6 +22,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Register Rate Limiting Middleware
+from app.middleware.rate_limiter import RateLimitingMiddleware
+app.add_middleware(RateLimitingMiddleware)
+
 # Phase 1 Routers
 app.include_router(auth.router, prefix="/api")
 app.include_router(devices.router, prefix="/api")
@@ -37,6 +41,13 @@ app.include_router(firewall.router, prefix="/api")
 # Phase 3 Routers
 app.include_router(deception.router, prefix="/api")
 app.include_router(privacy.router, prefix="/api")
+app.include_router(browser.router, prefix="/api")
+
+# Phase 4 Router
+app.include_router(behavior.router, prefix="/api")
+
+# Recovery & Rollback
+app.include_router(recovery.router, prefix="/api")
 
 @app.get("/")
 def read_root():

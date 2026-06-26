@@ -68,6 +68,10 @@ class ThreatLogCreate(BaseModel):
     action: str  # e.g., modified, started, blocked
     details: Optional[dict] = None
 
+class ThreatLogBatch(BaseModel):
+    """Batch of log events from the real agent — processed in one request."""
+    events: List[ThreatLogCreate]
+
 class ThreatLogResponse(BaseModel):
     id: int
     device_id: str
@@ -130,3 +134,15 @@ class DashboardSummary(BaseModel):
     total_threats: int
     overall_trust_score: int
     recent_events: List[ThreatEventResponse]
+
+# Auth Schemas
+class ForgotPassword(BaseModel):
+    email: EmailStr
+
+class ResetPassword(BaseModel):
+    email: EmailStr
+    token: str
+    new_password: str
+
+class UserRoleUpdate(BaseModel):
+    role: str

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -6,6 +6,11 @@ from app.models import Device, ThreatEvent, ThreatLog
 from app.schemas import DashboardSummary
 from app.services.auth_service import get_current_user, get_current_user_optional_query
 import datetime
+from io import BytesIO
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
@@ -223,3 +228,174 @@ def export_report_html(db: Session = Depends(get_db), current_user = Depends(get
     </html>
     """
     return html_content
+
+@router.get("/export-csv")
+def export_report_csv(db: Session = Depends(get_db), current_user = Depends(get_current_user_optional_query)):
+    from fastapi.responses import PlainTextResponse
+    
+    all_threats = db.query(ThreatEvent).order_by(ThreatEvent.timestamp.desc()).all()
+    
+    csv_content = "Timestamp,Device_ID,Title,Category,Status,Severity,Confidence\n"
+    for t in all_threats:
+        title = t.title.replace('"', '""')
+        csv_content += f'"{t.timestamp.isoformat()}","{t.device_id}","{title}","{t.category}","{t.status}","{t.severity}",{t.confidence_score}\n'
+        
+    return PlainTextResponse(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=threat_report_{datetime.datetime.utcnow().strftime('%Y%m%d')}.csv"}
+    )
+
+@router.get("/export-pdf")
+def export_report_pdf(db: Session = Depends(get_db), current_user = Depends(get_current_user_optional_query)):
+    total_devices = db.query(Device).count()
+    active_devices = db.query(Device).filter(Device.status == "online").count()
+    total_threats = db.query(ThreatEvent).count()
+    critical_threats = db.query(ThreatEvent).filter(ThreatEvent.severity == "critical").count()
+    devices = db.query(Device).all()
+    avg_trust = int(sum(d.trust_score for d in devices) / len(devices)) if devices else 100
+    
+    all_threats = db.query(ThreatEvent).order_by(ThreatEvent.timestamp.desc()).all()
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        rightMargin=40,
+        leftMargin=40,
+        topMargin=40,
+        bottomMargin=40
+    )
+    story = []
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle(
+        'DocTitle',
+        parent=styles['Heading1'],
+        fontName='Helvetica-Bold',
+        fontSize=24,
+        leading=28,
+        textColor=colors.HexColor('#1a365d'),
+        spaceAfter=6
+    )
+    subtitle_style = ParagraphStyle(
+        'DocSubtitle',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=10,
+        leading=12,
+        textColor=colors.HexColor('#718096'),
+        spaceAfter=20
+    )
+    section_heading = ParagraphStyle(
+        'SectionHeading',
+        parent=styles['Heading2'],
+        fontName='Helvetica-Bold',
+        fontSize=14,
+        leading=18,
+        textColor=colors.HexColor('#1a365d'),
+        spaceBefore=15,
+        spaceAfter=10
+    )
+    normal_style = ParagraphStyle(
+        'NormalText',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=9,
+        leading=11,
+        textColor=colors.HexColor('#333333')
+    )
+    bold_style = ParagraphStyle(
+        'BoldText',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=9,
+        leading=11,
+        textColor=colors.HexColor('#333333')
+    )
+    header_style = ParagraphStyle(
+        'TableHeader',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=9,
+        leading=11,
+        textColor=colors.white
+    )
+
+    story.append(Paragraph("Ransomware Defense System", title_style))
+    story.append(Paragraph(f"Executive Status & Threat Incident Report • Generated on {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC", subtitle_style))
+    story.append(Spacer(1, 10))
+
+    stats_data = [
+        [
+            Paragraph("<b>SYSTEM STATUS</b>", normal_style),
+            Paragraph("<b>PROTECTED DEVICES</b>", normal_style),
+            Paragraph("<b>TOTAL INCIDENTS</b>", normal_style),
+            Paragraph("<b>CRITICAL ALERTS</b>", normal_style)
+        ],
+        [
+            Paragraph(f"<font color='#2b6cb0'><b>{avg_trust}/100</b></font>", ParagraphStyle('StatVal', parent=normal_style, fontSize=16, leading=18)),
+            Paragraph(f"<b>{total_devices}</b> ({active_devices} Online)", normal_style),
+            Paragraph(f"<b>{total_threats}</b>", normal_style),
+            Paragraph(f"<font color='#c53030'><b>{critical_threats}</b></font>", ParagraphStyle('StatValCrit', parent=normal_style, fontSize=16, leading=18))
+        ]
+    ]
+    stats_table = Table(stats_data, colWidths=[130, 140, 120, 120])
+    stats_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f7fafc')),
+        ('BACKGROUND', (0,1), (-1,1), colors.HexColor('#f7fafc')),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#e2e8f0')),
+        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e2e8f0')),
+        ('TOPPADDING', (0,0), (-1,-1), 10),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+    ]))
+    story.append(stats_table)
+    story.append(Spacer(1, 20))
+
+    story.append(Paragraph("Security Threat Events & History", section_heading))
+    
+    headers = ["Timestamp", "Device ID", "Threat Incident", "Category", "Status", "Severity", "Conf."]
+    table_data = [[Paragraph(h, header_style) for h in headers]]
+    
+    for t in all_threats:
+        status_color = '#ef4444' if t.status == 'active' else '#10b981'
+        sev_color = '#ef4444' if t.severity.lower() == 'critical' else '#f97316' if t.severity.lower() == 'high' else '#f59e0b' if t.severity.lower() == 'medium' else '#10b981'
+        
+        row = [
+            Paragraph(t.timestamp.strftime('%Y-%m-%d %H:%M:%S'), normal_style),
+            Paragraph(t.device_id, bold_style),
+            Paragraph(t.title, normal_style),
+            Paragraph(t.category.upper(), bold_style),
+            Paragraph(f"<font color='{status_color}'><b>{t.status.upper()}</b></font>", normal_style),
+            Paragraph(f"<font color='{sev_color}'><b>{t.severity.upper()}</b></font>", normal_style),
+            Paragraph(f"{t.confidence_score}%", normal_style),
+        ]
+        table_data.append(row)
+        
+    threats_table = Table(table_data, colWidths=[95, 70, 150, 65, 55, 55, 40])
+    threats_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2b6cb0')),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+        ('TOPPADDING', (0,0), (-1,-1), 6),
+        ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#f8fafc')]),
+        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e2e8f0')),
+        ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor('#cbd5e0')),
+    ]))
+    story.append(threats_table)
+    
+    story.append(Spacer(1, 30))
+    story.append(Paragraph("<font color='#a0aec0'>Confidential Internal Report • Ransomware Defense System Endpoint Monitoring</font>", ParagraphStyle('Footer', parent=normal_style, alignment=1)))
+
+    doc.build(story)
+    pdf_out = buffer.getvalue()
+    buffer.close()
+    
+    return Response(
+        content=pdf_out,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=threat_report_{datetime.datetime.utcnow().strftime('%Y%m%d')}.pdf"}
+    )

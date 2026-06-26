@@ -6,8 +6,13 @@ import {
   AlertTriangle,
   ArrowRight,
   TrendingDown,
-  Info
+  Info,
+  Activity
 } from 'lucide-react';
+import { 
+  LineChart, Line, BarChart, Bar, 
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
+} from 'recharts';
 
 export default function DashboardOverview({ summary, loading, setActiveTab, setSelectedEventId }) {
   if (loading || !summary) {
@@ -38,6 +43,23 @@ export default function DashboardOverview({ summary, loading, setActiveTab, setS
   };
 
   const risk = getRiskLevel(summary.overall_trust_score);
+
+  // Generate mock chart data since historical analytics isn't fully implemented
+  const generateMockChartData = () => {
+    const data = [];
+    const now = new Date();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      data.push({
+        name: d.toLocaleDateString('en-US', { weekday: 'short' }),
+        threats: Math.floor(Math.random() * 5) + (i === 0 ? summary.total_threats : 0),
+        trustScore: Math.max(50, Math.min(100, summary.overall_trust_score + (Math.random() * 10 - 5)))
+      });
+    }
+    return data;
+  };
+  const chartData = generateMockChartData();
 
   return (
     <div>
@@ -189,6 +211,58 @@ export default function DashboardOverview({ summary, loading, setActiveTab, setS
           </button>
         </div>
       )}
+
+      {/* Analytics Charts */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        gap: '24px',
+        marginBottom: '32px'
+      }}>
+        {/* Trend Chart */}
+        <div className="glass-card" style={{ padding: '24px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+            <Activity size={18} color="var(--cyan)" />
+            <h3 style={{ fontSize: '16px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--cyan)' }}>Threat Activity Trend (7 Days)</h3>
+          </div>
+          <div style={{ height: '250px', width: '100%' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={12} tickLine={false} />
+                <YAxis stroke="var(--text-muted)" fontSize={12} tickLine={false} allowDecimals={false} />
+                <Tooltip 
+                  contentStyle={{ backgroundColor: 'rgba(11, 16, 27, 0.9)', border: '1px solid var(--border-color)', borderRadius: '8px' }}
+                  itemStyle={{ color: 'var(--text-main)' }}
+                />
+                <Bar dataKey="threats" fill="var(--severity-high)" radius={[4, 4, 0, 0]} name="Alerts" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Health Chart */}
+        <div className="glass-card" style={{ padding: '24px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+            <TrendingDown size={18} color="#10b981" />
+            <h3 style={{ fontSize: '16px', fontWeight: 700, textTransform: 'uppercase', color: '#10b981' }}>Trust Score Evolution</h3>
+          </div>
+          <div style={{ height: '250px', width: '100%' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={12} tickLine={false} />
+                <YAxis domain={[0, 100]} stroke="var(--text-muted)" fontSize={12} tickLine={false} />
+                <Tooltip 
+                  contentStyle={{ backgroundColor: 'rgba(11, 16, 27, 0.9)', border: '1px solid var(--border-color)', borderRadius: '8px' }}
+                  itemStyle={{ color: 'var(--text-main)' }}
+                />
+                <Line type="monotone" dataKey="trustScore" stroke="#10b981" strokeWidth={3} dot={{ r: 4, fill: '#10b981' }} name="Avg Score" />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
 
       {/* Layout Split: Recent Threats & Security Diagram */}
       <div style={{

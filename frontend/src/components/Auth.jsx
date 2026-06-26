@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { api } from '../services/api';
 import { Shield, Eye, EyeOff, KeyRound, Mail, Info } from 'lucide-react';
+import ForgotPassword from './ForgotPassword';
 
 export default function Auth({ onAuthSuccess }) {
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -51,6 +53,10 @@ export default function Auth({ onAuthSuccess }) {
       setLoading(false);
     }
   };
+
+  if (showForgotPassword) {
+    return <ForgotPassword onBackToLogin={() => setShowForgotPassword(false)} />;
+  }
 
   return (
     <div style={{
@@ -167,6 +173,17 @@ export default function Auth({ onAuthSuccess }) {
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
+              {isLogin && (
+                <div style={{ textAlign: 'right', marginTop: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotPassword(true)}
+                    style={{ background: 'none', border: 'none', color: 'var(--cyan)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Forgot Password?
+                  </button>
+                </div>
+              )}
             </div>
 
             <button
