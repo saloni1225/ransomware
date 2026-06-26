@@ -77,6 +77,32 @@ export const api = {
     return !!localStorage.getItem('token');
   },
 
+  forgotPassword: async (email) => {
+    const response = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || 'Failed to request password reset');
+    }
+    return response.json();
+  },
+
+  resetPassword: async (email, token, newPassword) => {
+    const response = await fetch(`${API_BASE_URL}/auth/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, token, new_password: newPassword }),
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || 'Failed to reset password');
+    }
+    return response.json();
+  },
+
   // Devices
   listDevices: async () => {
     const response = await fetch(`${API_BASE_URL}/devices/`, {
@@ -155,6 +181,16 @@ export const api = {
   getExportReportUrl: () => {
     const token = localStorage.getItem('token');
     return `${API_BASE_URL}/reports/export-html?token=${token}`; // For opening in new window
+  },
+
+  getExportReportPdfUrl: () => {
+    const token = localStorage.getItem('token');
+    return `${API_BASE_URL}/reports/export-pdf?token=${token}`; // For downloading PDF
+  },
+
+  getExportReportCsvUrl: () => {
+    const token = localStorage.getItem('token');
+    return `${API_BASE_URL}/reports/export-csv?token=${token}`; // For downloading CSV
   },
 
   // ── Phase 2: Malware ─────────────────────────────────────────────────────
@@ -328,5 +364,81 @@ export const api = {
     if (!response.ok) throw new Error('Failed to load trust score');
     return response.json();
   },
+
+  // ── Recovery & Rollback ─────────────────────────────────────────────────
+  listQuarantinedFiles: async () => {
+    const response = await fetch(`${API_BASE_URL}/recovery/quarantine`, { headers: getHeaders() });
+    if (!response.ok) throw new Error('Failed to load quarantined files');
+    return response.json();
+  },
+
+  restoreFile: async (scanId, notes = '') => {
+    const response = await fetch(`${API_BASE_URL}/recovery/restore/${scanId}`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ notes }),
+    });
+    if (!response.ok) throw new Error('Failed to restore file');
+    return response.json();
+  },
+
+  deleteFile: async (scanId, notes = '') => {
+    const response = await fetch(`${API_BASE_URL}/recovery/delete/${scanId}`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ notes }),
+    });
+    if (!response.ok) throw new Error('Failed to permanently delete file');
+    return response.json();
+  },
+
+  rollbackThreatEvent: async (eventId, notes = '') => {
+    const response = await fetch(`${API_BASE_URL}/recovery/rollback/${eventId}`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ notes }),
+    });
+    if (!response.ok) throw new Error('Failed to rollback threat event');
+    return response.json();
+  },
+
+  getRecoveryHistory: async (skip = 0, limit = 50) => {
+    const response = await fetch(`${API_BASE_URL}/recovery/history?skip=${skip}&limit=${limit}`, {
+      headers: getHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to load recovery history');
+    return response.json();
+  },
+
+  getRecoveryStats: async () => {
+    const response = await fetch(`${API_BASE_URL}/recovery/stats`, { headers: getHeaders() });
+    if (!response.ok) throw new Error('Failed to load recovery stats');
+    return response.json();
+  },
+
+  // ── Phase 3: Browser Protection ─────────────────────────────────────────
+  checkUrlSafety: async (url) => {
+    const response = await fetch(`${API_BASE_URL}/browser/check-url`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ url }),
+    });
+    if (!response.ok) throw new Error('Failed to check URL safety');
+    return response.json();
+  },
+
+  listBrowserEvents: async (limit = 100) => {
+    const response = await fetch(`${API_BASE_URL}/browser/events?limit=${limit}`, { headers: getHeaders() });
+    if (!response.ok) throw new Error('Failed to load browser events');
+    return response.json();
+  },
+
+  getBrowserStats: async () => {
+    const response = await fetch(`${API_BASE_URL}/browser/stats`, { headers: getHeaders() });
+    if (!response.ok) throw new Error('Failed to load browser stats');
+    return response.json();
+  },
 };
+
+
 

@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
+from app.config import settings
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User
-from app.schemas import UserCreate, UserLogin, UserResponse, OTPVerify, Token
+from app.schemas import UserCreate, UserLogin, UserResponse, OTPVerify, Token, ForgotPassword, ResetPassword, UserRoleUpdate
 from app.services.auth_service import (
     hash_password, verify_password, generate_totp_secret,
     get_totp_uri, generate_qr_code_base64, verify_totp,
-    create_access_token, get_current_user
+    create_access_token, get_current_user, oauth2_scheme
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -63,7 +64,7 @@ def login(credentials: UserLogin, db: Session = Depends(get_db)):
     }
 
 @router.post("/verify-otp", response_model=Token)
-def verify_otp_endpoint(payload: OTPVerify, db: Session = Depends(get_db)):
+def verify_otp_endpoint(payload: OTPVerify, request: Request, db: Session = Depends(get_db)):
     # Validate user exists
     user = db.query(User).filter(User.email == payload.email).first()
     if not user:
@@ -85,6 +86,63 @@ def verify_otp_endpoint(payload: OTPVerify, db: Session = Depends(get_db)):
         user.totp_enabled = True
         db.commit()
     
+    # Risk-based login check
+    from app.models import LoginRiskEvent
+    import datetime
+
+    client_ip = request.client.host
+    now = datetime.datetime.utcnow()
+    current_hour = now.hour
+
+    history = (
+        db.query(LoginRiskEvent)
+        .filter(LoginRiskEvent.user_email == user.email, LoginRiskEvent.status == "allowed")
+        .order_by(LoginRiskEvent.timestamp.desc())
+        .limit(15)
+        .all()
+    )
+
+    risk_score = 0
+    risk_factors = []
+
+    if len(history) >= 3:
+        # Check IP Anomaly
+        ip_set = {h.ip_address for h in history}
+        if client_ip not in ip_set:
+            risk_score += 50
+            risk_factors.append("unusual_ip")
+
+        # Check Time Anomaly (circular distance)
+        hours = [h.timestamp.hour for h in history]
+        mean_hour = sum(hours) / len(hours)
+        dist = min(abs(current_hour - mean_hour), 24 - abs(current_hour - mean_hour))
+        if dist > 4.0:
+            risk_score += 30
+            risk_factors.append("unusual_time")
+    
+    login_status = "allowed"
+    if risk_score >= 80:
+        login_status = "blocked"
+    elif risk_score >= 50:
+        login_status = "flagged"
+
+    risk_event = LoginRiskEvent(
+        user_email=user.email,
+        ip_address=client_ip,
+        risk_score=risk_score,
+        risk_factors=risk_factors,
+        status=login_status,
+        timestamp=now
+    )
+    db.add(risk_event)
+    db.commit()
+
+    if login_status == "blocked":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Security access blocked: high-risk login detected. Factors: {', '.join(risk_factors)}"
+        )
+
     # Generate JWT Token
     access_token = create_access_token(data={"sub": user.email, "role": user.role})
     return {
@@ -98,6 +156,23 @@ def verify_otp_endpoint(payload: OTPVerify, db: Session = Depends(get_db)):
 def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
+@router.post("/logout")
+def logout_endpoint(token: str = Depends(oauth2_scheme)):
+    from app.services.auth_service import decode_access_token
+    from app.redis_client import redis_client
+    import time
+    
+    payload = decode_access_token(token)
+    if payload:
+        exp = payload.get("exp")
+        if exp:
+            now = int(time.time())
+            ttl = int(exp - now)
+            if ttl > 0:
+                redis_client.blacklist_token(token, ttl)
+                
+    return {"detail": "Successfully logged out"}
+
 @router.get("/debug-totp")
 def get_debug_totp(email: str, db: Session = Depends(get_db)):
     if settings.ENVIRONMENT != "development":
@@ -108,3 +183,52 @@ def get_debug_totp(email: str, db: Session = Depends(get_db)):
     import pyotp
     totp = pyotp.TOTP(user.totp_secret)
     return {"code": totp.now()}
+
+@router.post("/forgot-password")
+def forgot_password(payload: ForgotPassword, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == payload.email).first()
+    if not user:
+        return {"detail": "If the email is registered, a password reset link has been sent."}
+    
+    token = create_access_token(data={"sub": user.email, "type": "reset"})
+    return {"detail": "If the email is registered, a password reset link has been sent.", "mock_token": token}
+
+@router.post("/reset-password")
+def reset_password(payload: ResetPassword, db: Session = Depends(get_db)):
+    try:
+        from jose import jwt
+        from app.config import settings
+        payload_data = jwt.decode(payload.token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        email = payload_data.get("sub")
+        if email != payload.email:
+            raise HTTPException(status_code=400, detail="Invalid token")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+        
+    user = db.query(User).filter(User.email == payload.email).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="User not found")
+        
+    user.hashed_password = hash_password(payload.new_password)
+    db.commit()
+    return {"detail": "Password successfully reset"}
+
+@router.put("/users/{user_id}/role")
+def update_user_role(user_id: int, payload: UserRoleUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized to change roles")
+    
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    user.role = payload.role
+    db.commit()
+    return {"detail": f"Role updated to {payload.role}"}
+
+@router.get("/users")
+def get_all_users(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized")
+    users = db.query(User).all()
+    return [{"id": u.id, "email": u.email, "role": u.role, "is_active": u.is_active} for u in users]

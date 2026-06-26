@@ -4,8 +4,8 @@ from typing import List, Optional
 import datetime
 
 from app.database import get_db
-from app.models import ThreatLog, ThreatEvent, Device
-from app.schemas import ThreatLogCreate, ThreatLogResponse, ThreatEventResponse
+from app.models import ThreatLog, ThreatEvent, Device, WiFiNetwork, NetworkConnection, MalwareScan
+from app.schemas import ThreatLogCreate, ThreatLogBatch, ThreatLogResponse, ThreatEventResponse, ThreatEventCreate
 from app.services.auth_service import get_current_user
 from app.services.ai_service import generate_ai_explanation
 from app.services.correlation_engine import generate_attack_storyline
@@ -95,6 +95,13 @@ def analyze_logs_and_trigger_events(db: Session, log: ThreatLog):
         device.trust_score = max(0, device.trust_score - 20)
         db.commit()
 
+        # Send Webhook Notification
+        try:
+            from app.services.notification_service import send_threat_notification
+            send_threat_notification(triggered_event)
+        except Exception as e:
+            print(f"Error calling notification service: {e}")
+
 @router.post("/logs", response_model=ThreatLogResponse)
 def ingest_log(log_in: ThreatLogCreate, db: Session = Depends(get_db)):
     # Verify device exists (register it automatically if not seen before)
@@ -110,7 +117,10 @@ def ingest_log(log_in: ThreatLogCreate, db: Session = Depends(get_db)):
         db.add(device)
         db.commit()
         db.refresh(device)
-        
+
+    # Handle special types that go to dedicated tables rather than threat_logs
+    _handle_specialised_event(db, log_in, device)
+
     db_log = ThreatLog(
         device_id=log_in.device_id,
         type=log_in.type,
@@ -121,11 +131,116 @@ def ingest_log(log_in: ThreatLogCreate, db: Session = Depends(get_db)):
     db.add(db_log)
     db.commit()
     db.refresh(db_log)
-    
+
     # Process rules and trigger threat events if matching patterns are found
     analyze_logs_and_trigger_events(db, db_log)
-    
+
     return db_log
+
+
+@router.post("/logs/batch")
+def ingest_log_batch(batch: ThreatLogBatch, db: Session = Depends(get_db)):
+    """
+    Batch event ingestion endpoint for the real agent.
+    Accepts up to 100 events per request and processes them sequentially.
+    Returns a summary dict rather than full log objects to keep the response lean.
+    """
+    results = {"accepted": 0, "rejected": 0, "errors": []}
+
+    for event in batch.events[:100]:  # hard cap at 100 per batch
+        try:
+            # Ensure device exists
+            device = db.query(Device).filter(Device.id == event.device_id).first()
+            if not device:
+                device = Device(
+                    id=event.device_id,
+                    hostname=event.device_id,
+                    status="online",
+                    trust_score=100,
+                    last_seen=datetime.datetime.utcnow()
+                )
+                db.add(device)
+                db.commit()
+                db.refresh(device)
+            else:
+                # Update last_seen on each batch
+                device.last_seen = datetime.datetime.utcnow()
+                db.commit()
+
+            # Handle specialised event routing (WiFi, Network, etc.)
+            _handle_specialised_event(db, event, device)
+
+            db_log = ThreatLog(
+                device_id=event.device_id,
+                type=event.type,
+                action=event.action,
+                details=event.details,
+                timestamp=datetime.datetime.utcnow()
+            )
+            db.add(db_log)
+            db.commit()
+            db.refresh(db_log)
+
+            analyze_logs_and_trigger_events(db, db_log)
+            results["accepted"] += 1
+
+        except Exception as exc:
+            results["rejected"] += 1
+            results["errors"].append(str(exc)[:120])
+
+    return results
+
+
+def _handle_specialised_event(
+    db: Session,
+    log_in: ThreatLogCreate,
+    device: Device,
+) -> None:
+    """
+    Routes certain event types into their dedicated tables
+    (WiFiNetwork, NetworkConnection, MalwareScan) so the corresponding
+    frontend modules display live data from the agent.
+    """
+    details = log_in.details or {}
+    event_type = log_in.type
+    action = log_in.action
+
+    # ── WiFi scan results ─────────────────────────────────────────────────
+    if event_type == "wifi" and action == "scan_result":
+        existing = db.query(WiFiNetwork).filter(
+            WiFiNetwork.device_id == device.id,
+            WiFiNetwork.ssid == details.get("ssid", ""),
+            WiFiNetwork.bssid == details.get("bssid", ""),
+        ).first()
+        if not existing:
+            wifi = WiFiNetwork(
+                device_id=device.id,
+                ssid=details.get("ssid", "Unknown"),
+                bssid=details.get("bssid", ""),
+                signal_strength=details.get("signal_strength", -70),
+                channel=details.get("channel"),
+                security_type=details.get("security_type", "Unknown"),
+                risk_level=details.get("risk_level", "low"),
+                is_connected=details.get("is_connected", False),
+                is_evil_twin=details.get("is_evil_twin", False),
+            )
+            db.add(wifi)
+            db.commit()
+
+    # ── Network connections ───────────────────────────────────────────────
+    elif event_type == "network" and action in ("new_connection", "suspicious_connection"):
+        conn = NetworkConnection(
+            device_id=device.id,
+            remote_ip=details.get("remote_ip", "0.0.0.0"),
+            remote_port=details.get("remote_port"),
+            local_port=details.get("local_port"),
+            protocol=details.get("protocol", "TCP"),
+            process_name=details.get("process_name", "unknown"),
+            status=details.get("status", "normal"),
+        )
+        db.add(conn)
+        db.commit()
+
 
 @router.get("/events", response_model=List[ThreatEventResponse])
 def list_threat_events(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
@@ -202,3 +317,38 @@ def get_event_storyline(event_id: int, db: Session = Depends(get_db), current_us
         
     storyline = generate_attack_storyline(db, event)
     return storyline.storyline_data
+
+@router.get("/")
+def get_threats(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    return list_threat_events(db, current_user)
+
+@router.post("/")
+def create_threat(threat_in: ThreatEventCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    device = db.query(Device).filter(Device.id == threat_in.device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    new_event = ThreatEvent(
+        device_id=threat_in.device_id,
+        title=threat_in.title,
+        description=threat_in.description,
+        category=threat_in.category,
+        severity=threat_in.severity,
+        confidence_score=threat_in.confidence_score,
+        timestamp=datetime.datetime.utcnow()
+    )
+    db.add(new_event)
+    db.commit()
+    db.refresh(new_event)
+    return new_event
+
+@router.get("/{id}")
+def get_threat(id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    return get_threat_event(id, db, current_user)
+
+@router.get("/incidents/all")
+def get_incidents(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    return list_threat_events(db, current_user)
+
+@router.get("/storyline/{id}")
+def get_storyline_by_id(id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    return get_event_storyline(id, db, current_user)

@@ -17,6 +17,11 @@ def clean_db():
     db = SessionLocal()
     try:
         # Clean up database test entities
+        event_ids = [e.id for e in db.query(ThreatEvent).filter(ThreatEvent.device_id == "test-device-y").all()]
+        if event_ids:
+            db.query(AIExplanation).filter(AIExplanation.threat_event_id.in_(event_ids)).delete()
+            db.query(AttackStoryline).filter(AttackStoryline.threat_event_id.in_(event_ids)).delete()
+            
         db.query(ThreatLog).filter(ThreatLog.device_id == "test-device-y").delete()
         db.query(ThreatEvent).filter(ThreatEvent.device_id == "test-device-y").delete()
         db.query(Device).filter(Device.id == "test-device-y").delete()

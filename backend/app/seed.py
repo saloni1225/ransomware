@@ -3,7 +3,7 @@ from app.database import engine, SessionLocal, Base
 from app.models import (
     User, Device, ThreatLog, ThreatEvent, AIExplanation, AttackStoryline,
     MalwareScan, NetworkConnection, WiFiNetwork, FirewallRule,
-    DeceptionAsset, PrivacyEvent
+    DeceptionAsset, PrivacyEvent, BrowserEvent, BehaviorProfile, AnomalyEvent
 )
 from app.services.auth_service import hash_password
 from app.services.ai_service import generate_ai_explanation
@@ -204,6 +204,17 @@ def seed_db():
         db.commit()
         print("Seeded privacy events.")
 
+        # 8b. Seed Browser Events
+        browser_evs = [
+            BrowserEvent(device_id="win10-office-pc", event_type="phishing", url="http://login-secure-paypal.com/verify", domain="login-secure-paypal.com", risk_score=85, is_blocked=True, details={"user_agent": "Chrome", "ip": "185.220.101.45"}, timestamp=datetime.datetime.utcnow() - datetime.timedelta(hours=1)),
+            BrowserEvent(device_id="win10-office-pc", event_type="malicious_download", url="https://crack-exe-site.org/patch.exe", domain="crack-exe-site.org", risk_score=95, is_blocked=True, details={"filename": "patch.exe", "size": 1048576}, timestamp=datetime.datetime.utcnow() - datetime.timedelta(hours=2)),
+            BrowserEvent(device_id="macbook-m2-dev", event_type="fake_login", url="http://netflix-update-billing.secure-signin.info/login", domain="netflix-update-billing.secure-signin.info", risk_score=75, is_blocked=False, details={"method": "POST"}, timestamp=datetime.datetime.utcnow() - datetime.timedelta(hours=4)),
+            BrowserEvent(device_id="linux-prod-db", event_type="suspicious_domain", url="http://198.54.117.88:8080/shell", domain="198.54.117.88", risk_score=90, is_blocked=True, details={"port": 8080}, timestamp=datetime.datetime.utcnow() - datetime.timedelta(days=1)),
+        ]
+        db.add_all(browser_evs)
+        db.commit()
+        print("Seeded browser events.")
+
         # 9. Seed Malware Scans
         mal_scans = [
             MalwareScan(device_id="win10-office-pc", file_path="C:\\Users\\Admin\\Downloads\\invoice_2024.pdf.exe", file_hash="44d88612fea8a8f36de82e1278abb02f", file_size=45230, status="infected", threat_name="EICAR-Test-File"),
@@ -247,7 +258,29 @@ def seed_db():
         db.commit()
         print("Seeded Wi-Fi networks.")
 
-        print("\n[OK] Database seeding completed (Phase 1 + Phase 2 + Phase 3).")
+        # 12. Seed Behavior Profiles
+        profiles = [
+            BehaviorProfile(device_id="win10-office-pc", metric_name="cpu_usage", baseline_mean=14.5, baseline_std=3.2, datapoint_count=45),
+            BehaviorProfile(device_id="win10-office-pc", metric_name="network_sent_mb", baseline_mean=120.4, baseline_std=15.1, datapoint_count=32),
+            BehaviorProfile(device_id="macbook-m2-dev", metric_name="process_count", baseline_mean=180.0, baseline_std=10.0, datapoint_count=60),
+            BehaviorProfile(device_id="macbook-m2-dev", metric_name="login_hour", baseline_mean=9.2, baseline_std=0.8, datapoint_count=20),
+            BehaviorProfile(device_id="linux-prod-db", metric_name="active_connections", baseline_mean=42.0, baseline_std=2.5, datapoint_count=100),
+        ]
+        db.add_all(profiles)
+        db.commit()
+        print("Seeded behavior profiles.")
+
+        # 13. Seed Anomaly Events
+        anomalies = [
+            AnomalyEvent(device_id="win10-office-pc", metric_name="network_sent_mb", observed_value=450.2, expected_mean=120.4, z_score=21.84, severity="critical", is_false_positive=False, timestamp=datetime.datetime.utcnow() - datetime.timedelta(hours=2)),
+            AnomalyEvent(device_id="macbook-m2-dev", metric_name="login_hour", observed_value=3.5, expected_mean=9.2, z_score=7.12, severity="high", is_false_positive=False, timestamp=datetime.datetime.utcnow() - datetime.timedelta(hours=5)),
+            AnomalyEvent(device_id="linux-prod-db", metric_name="active_connections", observed_value=51.0, expected_mean=42.0, z_score=3.6, severity="medium", is_false_positive=False, timestamp=datetime.datetime.utcnow() - datetime.timedelta(days=1)),
+        ]
+        db.add_all(anomalies)
+        db.commit()
+        print("Seeded anomaly events.")
+
+        print("\n[OK] Database seeding completed (Phase 1 + Phase 2 + Phase 3 + Phase 4).")
         
     except Exception as e:
         db.rollback()

@@ -6,6 +6,7 @@ import DashboardOverview from './components/DashboardOverview';
 import ThreatCenter from './components/ThreatCenter';
 import DeviceTrust from './components/DeviceTrust';
 import Reports from './components/Reports';
+import Recovery from './components/Recovery';
 // Phase 2
 import MalwareScan from './components/MalwareScan';
 import NetworkMonitor from './components/NetworkMonitor';
@@ -14,6 +15,8 @@ import FirewallModule from './components/FirewallModule';
 // Phase 3
 import DeceptionEngine from './components/DeceptionEngine';
 import PrivacyDashboard from './components/PrivacyDashboard';
+import BrowserProtection from './components/BrowserProtection';
+import Settings from './components/Settings';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(api.isAuthenticated());
@@ -129,6 +132,13 @@ export default function App() {
         {/* Phase 3 Tabs */}
         {activeTab === 'deception' && <DeceptionEngine />}
         {activeTab === 'privacy' && <PrivacyDashboard />}
+        {activeTab === 'browser' && <BrowserProtection />}
+
+        {/* Settings */}
+        {activeTab === 'settings' && <Settings />}
+
+        {/* Recovery & Rollback */}
+        {activeTab === 'recovery' && <Recovery />}
       </div>
     </div>
   );

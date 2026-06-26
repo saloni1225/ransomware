@@ -40,6 +40,9 @@ def create_access_token(data: dict, expires_delta: Optional[datetime.timedelta] 
     return encoded_jwt
 
 def decode_access_token(token: str) -> Optional[dict]:
+    from app.redis_client import redis_client
+    if redis_client.is_token_blacklisted(token):
+        return None
     try:
         decoded = jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
         return decoded
@@ -87,11 +90,12 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise credentials_exception
     return user
 
-from fastapi.security import APIKeyQuery
+from fastapi.security import APIKeyQuery, OAuth2PasswordBearer
 api_key_query = APIKeyQuery(name="token", auto_error=False)
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="api/auth/login", auto_error=False)
 
 def get_current_user_optional_query(
-    token_header: Optional[str] = Depends(oauth2_scheme),
+    token_header: Optional[str] = Depends(oauth2_scheme_optional),
     token_query: Optional[str] = Depends(api_key_query),
     db: Session = Depends(get_db)
 ) -> User:

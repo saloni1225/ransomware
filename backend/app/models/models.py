@@ -26,6 +26,7 @@ class Device(Base):
     status = Column(String, default="online") # online, offline
     trust_score = Column(Integer, default=100)
     firewall_status = Column(String, default="enabled") # enabled, disabled, unknown
+    patch_status = Column(String, default="up_to_date") # up_to_date, needs_reboot, critical_missing
     last_seen = Column(DateTime, default=datetime.datetime.utcnow)
 
     logs = relationship("ThreatLog", back_populates="device", cascade="all, delete-orphan")
@@ -181,3 +182,125 @@ class PrivacyEvent(Base):
 
     device = relationship("Device", foreign_keys=[device_id])
 
+class BrowserEvent(Base):
+    __tablename__ = "browser_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(String, ForeignKey("devices.id"), nullable=False)
+    event_type = Column(String, nullable=False)  # phishing, fake_login, malicious_download, suspicious_domain
+    url = Column(String, nullable=False)
+    domain = Column(String, nullable=True)
+    risk_score = Column(Integer, default=0)
+    is_blocked = Column(Boolean, default=False)
+    details = Column(JSON, nullable=True)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+
+    device = relationship("Device", foreign_keys=[device_id])
+
+class Report(Base):
+    __tablename__ = "reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=False)
+    report_type = Column(String, nullable=False) # e.g. weekly, incident, threat
+    generated_by = Column(String, nullable=True) # User email or "system"
+    file_path = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_email = Column(String, nullable=True)
+    action = Column(String, nullable=False) # e.g. login, export_report, delete_device
+    details = Column(String, nullable=True)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_email = Column(String, nullable=True)
+    title = Column(String, nullable=False)
+    message = Column(String, nullable=True)
+    is_read = Column(Boolean, default=False)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+
+class TrustScoreHistory(Base):
+    __tablename__ = "trust_score_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(String, ForeignKey("devices.id"), nullable=False)
+    score = Column(Integer, nullable=False)
+    factors = Column(JSON, nullable=True) # E.g. what caused the score to change
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+
+    device = relationship("Device", foreign_keys=[device_id])
+
+
+# ─── Recovery & Rollback Models ──────────────────────────────────────────────
+
+class RecoveryAction(Base):
+    __tablename__ = "recovery_actions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # Optional link to the malware scan whose quarantined file is being restored
+    scan_id = Column(Integer, ForeignKey("malware_scans.id"), nullable=True)
+    # Optional link to the threat event that triggered the action
+    threat_event_id = Column(Integer, ForeignKey("threat_events.id"), nullable=True)
+    device_id = Column(String, ForeignKey("devices.id"), nullable=True)
+    # 'restore', 'rollback', 'quarantine_confirm', 'delete_permanent'
+    action_type = Column(String, nullable=False, default="restore")
+    # The full path of the file involved
+    file_path = Column(String, nullable=True)
+    # Who performed the action (user email or "system")
+    performed_by = Column(String, nullable=True)
+    # 'success', 'failed', 'pending', 'reversed'
+    status = Column(String, default="pending")
+    notes = Column(String, nullable=True)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+
+    scan = relationship("MalwareScan", foreign_keys=[scan_id])
+    threat_event = relationship("ThreatEvent", foreign_keys=[threat_event_id])
+    device = relationship("Device", foreign_keys=[device_id])
+
+# ─── Behavior Baseline Engine Models ──────────────────────────────────────────
+
+class BehaviorProfile(Base):
+    __tablename__ = "behavior_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(String, ForeignKey("devices.id"), nullable=False)
+    metric_name = Column(String, nullable=False) # e.g. login_hour, process_count, network_volume_mb
+    baseline_mean = Column(Float, default=0.0)
+    baseline_std = Column(Float, default=1.0)
+    datapoint_count = Column(Integer, default=0)
+    last_updated = Column(DateTime, default=datetime.datetime.utcnow)
+
+    device = relationship("Device", foreign_keys=[device_id])
+
+class AnomalyEvent(Base):
+    __tablename__ = "anomaly_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(String, ForeignKey("devices.id"), nullable=False)
+    metric_name = Column(String, nullable=False)
+    observed_value = Column(Float, nullable=False)
+    expected_mean = Column(Float, nullable=False)
+    z_score = Column(Float, nullable=False)
+    severity = Column(String, default="low") # low, medium, high, critical
+    is_false_positive = Column(Boolean, default=False)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+
+    device = relationship("Device", foreign_keys=[device_id])
+
+class LoginRiskEvent(Base):
+    __tablename__ = "login_risk_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_email = Column(String, nullable=False)
+    ip_address = Column(String, nullable=False)
+    risk_score = Column(Integer, default=0)
+    risk_factors = Column(JSON, nullable=True) # JSON list of strings e.g. ["unusual_ip", "unusual_time"]
+    status = Column(String, default="allowed") # allowed, flagged, blocked
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
