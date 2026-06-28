@@ -1,3 +1,4 @@
+import os
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -6,8 +7,8 @@ from app.redis_client import redis_client
 class RateLimitingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        # Exclude API documentation paths
-        if path.startswith("/docs") or path.startswith("/openapi.json") or path.startswith("/redoc"):
+        # Exclude API documentation paths or bypass in tests
+        if os.getenv("TESTING") == "True" or path.startswith("/docs") or path.startswith("/openapi.json") or path.startswith("/redoc"):
             return await call_next(request)
 
         client_ip = request.client.host

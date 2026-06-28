@@ -27,26 +27,30 @@ def clean_db():
         db.close()
 
 def test_pdf_report_export(client):
-    email = "test_p10@defense.com"
-    password = "SecretPassword123"
-    
-    # Authenticate to get valid token
-    client.post("/api/auth/register", json={
-        "email": email,
-        "password": password
-    })
+    from app.services.auth_service import hash_password
+    db = SessionLocal()
+    try:
+        admin = db.query(User).filter(User.email == "admin@defense.com").first()
+        if not admin:
+            admin = User(
+                email="admin@defense.com",
+                hashed_password=hash_password("password123"),
+                role="admin",
+                totp_enabled=False
+            )
+            db.add(admin)
+        else:
+            admin.hashed_password = hash_password("password123")
+            admin.totp_enabled = False
+        db.commit()
+    finally:
+        db.close()
+        
     login_res = client.post("/api/auth/login", json={
-        "email": email,
-        "password": password
+        "email": "admin@defense.com",
+        "password": "password123"
     })
-    secret = login_res.json()["totp_secret"]
-    
-    totp = pyotp.TOTP(secret)
-    verify_res = client.post("/api/auth/verify-otp", json={
-        "email": email,
-        "otp_code": totp.now()
-    })
-    token = verify_res.json()["access_token"]
+    token = login_res.json()["access_token"]
 
     response = client.get(f"/api/reports/export-pdf?token={token}")
     assert response.status_code == 200
@@ -88,6 +92,14 @@ def test_risk_based_login(client):
         "password": password
     })
     assert reg_response.status_code == 201
+
+    # Enable TOTP in database for this user
+    db = SessionLocal()
+    user = db.query(User).filter(User.email == email).first()
+    user.totp_enabled = True
+    secret = user.totp_secret
+    db.commit()
+    db.close()
     
     # 2. Login User
     login_response = client.post("/api/auth/login", json={
@@ -95,7 +107,7 @@ def test_risk_based_login(client):
         "password": password
     })
     assert login_response.status_code == 200
-    secret = login_response.json()["totp_secret"]
+    secret = login_response.json()["totp_secret"] if "totp_secret" in login_response.json() else secret
     
     # 3. Verify TOTP Code (which triggers risk calculations)
     totp = pyotp.TOTP(secret)

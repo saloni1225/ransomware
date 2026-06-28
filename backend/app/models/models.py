@@ -304,3 +304,19 @@ class LoginRiskEvent(Base):
     risk_factors = Column(JSON, nullable=True) # JSON list of strings e.g. ["unusual_ip", "unusual_time"]
     status = Column(String, default="allowed") # allowed, flagged, blocked
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class AgentCommand(Base):
+    __tablename__ = "agent_commands"
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(String, ForeignKey("devices.id"), nullable=False)
+    command_type = Column(String, nullable=False)  # 'terminate_process', 'quarantine_file', 'restore_file', 'acknowledge_alert', 'sync_policy'
+    payload = Column(JSON, nullable=True)
+    status = Column(String, default="queued")  # 'queued', 'sent', 'running', 'success', 'failed'
+    execution_result = Column(JSON, nullable=True)
+    error_message = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    device = relationship("Device", foreign_keys=[device_id])

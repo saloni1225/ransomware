@@ -2,14 +2,8 @@
 Agent Sender
 ============
 Handles all HTTP communication between the local agent and the FastAPI backend.
-
-Features:
-- Auto-registers the device on first contact
-- Periodic heartbeat thread
-- In-memory event queue with configurable batch flush
-- Exponential-backoff retry queue
-- Offline JSONL buffer — events are persisted locally when the backend is
-  unreachable and replayed once connectivity is restored
+Saves all telemetry events to a secure local SQLite database first (ACID) before 
+flushing them to the backend, protecting against crashes and disconnects.
 """
 
 import json
@@ -20,7 +14,6 @@ import socket
 import threading
 import time
 import uuid
-from collections import deque
 from typing import Any, Dict, List, Optional
 
 try:
@@ -31,12 +24,11 @@ except ImportError:
     raise SystemExit("requests is required: pip install requests")
 
 import config
+from offline_db import OfflineDB
 
 logger = logging.getLogger("agent.sender")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Internal helpers
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Internal helpers ─────────────────────────────────────────────────────────
 
 def _build_session() -> requests.Session:
     """Creates a requests Session with connection-level retry (not our app retry)."""
@@ -65,60 +57,51 @@ def _get_mac() -> str:
     return ":".join(mac[i:i+2] for i in range(0, 12, 2))
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# AgentSender class
-# ─────────────────────────────────────────────────────────────────────────────
+# ── AgentSender class ────────────────────────────────────────────────────────
 
 class AgentSender:
     """
-    Thread-safe event sender.
-
-    Usage:
-        sender = AgentSender()
-        sender.start()          # starts heartbeat + flush threads
-        sender.enqueue(event)   # non-blocking
-        sender.stop()           # graceful shutdown
+    Thread-safe event sender that writes telemetry to SQLite first,
+    then synchronizes it in a background loop with exponential backoff.
     """
 
     def __init__(self):
         self._session = _build_session()
-        self._queue: deque = deque()        # pending events
-        self._retry_queue: deque = deque()  # events that failed at least once
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._registered = False
+        
+        # Initialise SQLite offline DB
+        db_path = os.path.join(os.path.dirname(config.__file__), "local_events_buffer.db")
+        self._db = OfflineDB(db_path, max_size=5000)
 
     # ── Public API ───────────────────────────────────────────────────────────
 
     def enqueue(self, log_type: str, action: str, details: Optional[Dict] = None) -> None:
-        """Add a single log event to the in-memory send queue (non-blocking)."""
+        """Add a single log event directly to the offline SQLite DB (non-blocking)."""
         event = {
             "device_id": config.DEVICE_ID,
             "type": log_type,
             "action": action,
             "details": details or {},
         }
-        with self._lock:
-            self._queue.append(event)
-        logger.debug("Enqueued event type=%s action=%s", log_type, action)
+        # First-to-disk write
+        self._db.enqueue(event)
+        logger.debug("Successfully enqueued event to disk type=%s action=%s", log_type, action)
 
     def start(self) -> None:
         """Register device then start background threads."""
         self._register_device()
-        self._replay_offline_buffer()
 
         threading.Thread(target=self._heartbeat_loop, daemon=True,
                          name="agent-heartbeat").start()
-        threading.Thread(target=self._flush_loop, daemon=True,
-                         name="agent-flush").start()
-        threading.Thread(target=self._retry_loop, daemon=True,
-                         name="agent-retry").start()
+        threading.Thread(target=self._sync_loop, daemon=True,
+                         name="agent-telemetry-sync").start()
         logger.info("AgentSender started (device_id=%s)", config.DEVICE_ID)
 
     def stop(self) -> None:
-        """Signal threads to stop then flush remaining events."""
+        """Signal threads to stop."""
         self._stop_event.set()
-        self._flush()
         logger.info("AgentSender stopped")
 
     # ── Device registration ──────────────────────────────────────────────────
@@ -193,36 +176,35 @@ class AgentSender:
         else:
             logger.warning("Heartbeat failed: %d", r.status_code)
 
-    # ── Flush loop ───────────────────────────────────────────────────────────
+    # ── Telemetry Sync Loop ──────────────────────────────────────────────────
 
-    def _flush_loop(self) -> None:
+    def _sync_loop(self) -> None:
+        """Drains events from SQLite DB and posts them with exponential backoff on failure."""
+        backoff_delay = 1.0  # seconds
+        
         while not self._stop_event.is_set():
-            self._flush()
-            self._stop_event.wait(config.BATCH_INTERVAL_SEC)
-
-    def _flush(self) -> None:
-        """Drain up to BATCH_SIZE events from queue and POST them."""
-        with self._lock:
-            if not self._queue:
-                return
-            batch: List[Dict] = []
-            for _ in range(min(config.BATCH_SIZE, len(self._queue))):
-                batch.append(self._queue.popleft())
-
-        if not batch:
-            return
-
-        success = self._post_batch(batch)
-        if not success:
-            # Move to retry queue AND write to offline buffer
-            with self._lock:
-                for event in batch:
-                    self._retry_queue.append((event, 0))
-            self._write_offline_buffer(batch)
+            batch_items = self._db.get_batch(config.BATCH_SIZE)
+            if not batch_items:
+                # No data to send, sleep batch interval
+                self._stop_event.wait(config.BATCH_INTERVAL_SEC)
+                continue
+                
+            batch_events = [item["event"] for item in batch_items]
+            batch_ids = [item["id"] for item in batch_items]
+            
+            success = self._post_batch(batch_events)
+            if success:
+                # Delete sent events from DB
+                self._db.delete_batch(batch_ids)
+                backoff_delay = 1.0  # reset backoff
+                # Loop immediately without delay to drain the remaining queue faster
+            else:
+                logger.warning("Sync failed. Retrying in %.1fs (exponential backoff)", backoff_delay)
+                self._stop_event.wait(backoff_delay)
+                backoff_delay = min(backoff_delay * 2, 60.0)
 
     def _post_batch(self, batch: List[Dict]) -> bool:
         """POST a batch of events. Returns True on success."""
-        # Try the batch endpoint first; fall back to individual posts
         try:
             r = self._session.post(
                 f"{config.BACKEND_URL}/threats/logs/batch",
@@ -230,11 +212,11 @@ class AgentSender:
                 timeout=15,
             )
             if r.status_code in (200, 201):
-                logger.info("Batch of %d events sent successfully", len(batch))
+                logger.info("Batch of %d events synced successfully", len(batch))
                 return True
             logger.warning("Batch endpoint returned %d — falling back to individual", r.status_code)
         except requests.RequestException:
-            logger.warning("Batch endpoint unreachable — falling back to individual POSTs")
+            logger.debug("Batch endpoint unreachable — trying individual POSTs")
 
         # Fallback: post one by one
         all_ok = True
@@ -251,79 +233,6 @@ class AgentSender:
                 all_ok = False
         return all_ok
 
-    # ── Retry loop ───────────────────────────────────────────────────────────
 
-    def _retry_loop(self) -> None:
-        while not self._stop_event.is_set():
-            time.sleep(30)  # wait before attempting retries
-            self._process_retries()
-
-    def _process_retries(self) -> None:
-        with self._lock:
-            if not self._retry_queue:
-                return
-            items = list(self._retry_queue)
-            self._retry_queue.clear()
-
-        still_failing = []
-        for event, attempts in items:
-            if attempts >= config.MAX_RETRY_ATTEMPTS:
-                logger.error("Dropping event after %d attempts: %s", attempts, event.get("type"))
-                continue
-            delay = config.RETRY_BASE_DELAY_SEC * (2 ** attempts)
-            time.sleep(min(delay, 30))
-            ok = self._post_batch([event])
-            if not ok:
-                still_failing.append((event, attempts + 1))
-            else:
-                logger.info("Retry succeeded for event: %s", event.get("type"))
-
-        with self._lock:
-            for item in still_failing:
-                self._retry_queue.append(item)
-
-    # ── Offline buffer ───────────────────────────────────────────────────────
-
-    def _write_offline_buffer(self, events: List[Dict]) -> None:
-        try:
-            with open(config.OFFLINE_BUFFER_PATH, "a", encoding="utf-8") as f:
-                for event in events:
-                    f.write(json.dumps(event) + "\n")
-            logger.info("Wrote %d events to offline buffer", len(events))
-        except OSError as exc:
-            logger.error("Failed to write offline buffer: %s", exc)
-
-    def _replay_offline_buffer(self) -> None:
-        if not os.path.exists(config.OFFLINE_BUFFER_PATH):
-            return
-        events = []
-        try:
-            with open(config.OFFLINE_BUFFER_PATH, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        events.append(json.loads(line))
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("Could not read offline buffer: %s", exc)
-            return
-
-        if not events:
-            return
-
-        logger.info("Replaying %d buffered offline events", len(events))
-        ok = self._post_batch(events)
-        if ok:
-            # Clear buffer after successful replay
-            try:
-                os.remove(config.OFFLINE_BUFFER_PATH)
-                logger.info("Offline buffer cleared after successful replay")
-            except OSError:
-                pass
-        else:
-            logger.warning("Replay failed — buffer retained for next startup")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Module-level singleton — all watcher modules import this
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Module-level singleton ───────────────────────────────────────────────────
 sender = AgentSender()

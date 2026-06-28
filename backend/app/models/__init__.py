@@ -6,5 +6,6 @@ from app.models.models import (
     BrowserEvent,
     BehaviorProfile, AnomalyEvent,
     LoginRiskEvent,
+    AgentCommand,
 )
 

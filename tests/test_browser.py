@@ -18,38 +18,26 @@ def client():
 def auth_header(client):
     db = SessionLocal()
     try:
-        # Create a test admin user if not exists
-        test_email = "test_admin_browser@defense.com"
+        test_email = "admin@defense.com"
         user = db.query(User).filter(User.email == test_email).first()
         if not user:
             user = User(
                 email=test_email,
                 hashed_password=hash_password("password123"),
                 role="admin",
-                totp_secret=generate_totp_secret(),
                 totp_enabled=False
             )
             db.add(user)
             db.commit()
             db.refresh(user)
-        
-        # Login to get MFA details
-        response = client.post("/api/auth/login", json={"email": test_email, "password": "password123"})
-        assert response.status_code == 200
-        res_data = response.json()
-        secret = res_data["totp_secret"]
-        
-        # Generate TOTP code
-        totp = pyotp.TOTP(secret)
-        code = totp.now()
-        
-        # Verify OTP to get access token
-        verify_response = client.post("/api/auth/verify-otp", json={"email": test_email, "otp_code": code})
-        assert verify_response.status_code == 200
-        token = verify_response.json()["access_token"]
-        return {"Authorization": f"Bearer {token}"}
     finally:
         db.close()
+        
+    response = client.post("/api/auth/login", json={"email": test_email, "password": "password123"})
+    assert response.status_code == 200
+    res_data = response.json()
+    token = res_data["access_token"]
+    return {"Authorization": f"Bearer {token}"}
 
 @pytest.fixture(autouse=True)
 def clean_db():

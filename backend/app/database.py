@@ -68,13 +68,17 @@ def check_and_create_database(db_url: str) -> str:
     print("MFA/DB Log: CRITICAL - Could not connect to PostgreSQL cluster. Falling back to SQLite (./ransomware_defense.db) for runtime convenience.")
     return "sqlite:///./ransomware_defense.db"
 
+from sqlalchemy.pool import NullPool
+
 DATABASE_URL = check_and_create_database(settings.DATABASE_URL)
 
 connect_args = {}
+pool_args = {}
 if DATABASE_URL.startswith("sqlite"):
     connect_args = {"check_same_thread": False}
+    pool_args = {"poolclass": NullPool}
 
-engine = create_engine(DATABASE_URL, connect_args=connect_args)
+engine = create_engine(DATABASE_URL, connect_args=connect_args, **pool_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

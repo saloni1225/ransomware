@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Shield, 
   LayoutDashboard, 
@@ -15,34 +15,27 @@ import {
   Settings,
   RotateCcw,
   Globe,
+  Sun,
+  Moon
 } from 'lucide-react';
 
 export default function Navbar({ activeTab, setActiveTab, handleLogout, userEmail }) {
+  const [theme, setTheme] = useState(document.documentElement.getAttribute('data-theme') || 'dark');
+
+  const toggleTheme = () => {
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', nextTheme);
+    localStorage.setItem('theme', nextTheme);
+    setTheme(nextTheme);
+  };
   const navSections = [
     {
-      label: 'Core',
+      label: 'Core Services',
       items: [
         { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard },
         { id: 'threats', name: 'Threat Center', icon: AlertOctagon },
         { id: 'devices', name: 'Device Trust', icon: Smartphone },
         { id: 'reports', name: 'Reports', icon: FileSpreadsheet },
-      ]
-    },
-    {
-      label: 'Phase 2 — Protection',
-      items: [
-        { id: 'malware', name: 'Malware Scan', icon: Bug },
-        { id: 'network', name: 'Network Monitor', icon: Activity },
-        { id: 'wifi', name: 'Wi-Fi Scanner', icon: Wifi },
-        { id: 'firewall', name: 'Firewall', icon: ShieldCheck },
-      ]
-    },
-    {
-      label: 'Phase 3 — Intelligence',
-      items: [
-        { id: 'deception', name: 'Deception Engine', icon: Crosshair },
-        { id: 'privacy', name: 'Privacy', icon: Lock },
-        { id: 'browser', name: 'Browser Protection', icon: Globe },
       ]
     },
     {
@@ -52,7 +45,24 @@ export default function Navbar({ activeTab, setActiveTab, handleLogout, userEmai
       ]
     },
     {
-      label: 'System',
+      label: 'Active Protection',
+      items: [
+        { id: 'malware', name: 'Malware Scan', icon: Bug },
+        { id: 'network', name: 'Network Monitor', icon: Activity },
+        { id: 'wifi', name: 'Wi-Fi Scanner', icon: Wifi },
+        { id: 'firewall', name: 'Firewall', icon: ShieldCheck },
+      ]
+    },
+    {
+      label: 'Threat Intelligence',
+      items: [
+        { id: 'deception', name: 'Deception Engine', icon: Crosshair },
+        { id: 'privacy', name: 'Privacy', icon: Lock },
+        { id: 'browser', name: 'Browser Protection', icon: Globe },
+      ]
+    },
+    {
+      label: 'System Management',
       items: [
         { id: 'settings', name: 'Settings', icon: Settings },
       ]
@@ -163,6 +173,37 @@ export default function Navbar({ activeTab, setActiveTab, handleLogout, userEmai
         flexDirection: 'column',
         gap: '12px'
       }}>
+        {/* Theme Toggle Button */}
+        <button
+          onClick={toggleTheme}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '9px 16px',
+            borderRadius: '8px',
+            border: '1px solid var(--border-color)',
+            background: 'rgba(255, 255, 255, 0.02)',
+            color: 'var(--text-secondary)',
+            fontFamily: 'var(--font-primary)',
+            fontSize: '13px',
+            fontWeight: 500,
+            cursor: 'pointer',
+            transition: 'var(--transition)',
+            width: '100%',
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'}
+          onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.02)'}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {theme === 'dark' ? <Sun size={15} color="var(--cyan)" /> : <Moon size={15} color="var(--cyan)" />}
+            <span>{theme === 'dark' ? 'Light Theme' : 'Dark Theme'}</span>
+          </div>
+          <span style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700 }}>
+            {theme}
+          </span>
+        </button>
+
         <div style={{ padding: '0 8px' }}>
           <p style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 500, textTransform: 'uppercase' }}>Signed in as</p>
           <p style={{

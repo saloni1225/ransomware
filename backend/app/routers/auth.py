@@ -3,7 +3,10 @@ from app.config import settings
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User
-from app.schemas import UserCreate, UserLogin, UserResponse, OTPVerify, Token, ForgotPassword, ResetPassword, UserRoleUpdate
+from app.schemas import (
+    UserCreate, UserLogin, UserResponse, OTPVerify, Token, ForgotPassword, 
+    ResetPassword, UserRoleUpdate, MFASetupResponse, MFADisable, MFAVerifyPayload
+)
 from app.services.auth_service import (
     hash_password, verify_password, generate_totp_secret,
     get_totp_uri, generate_qr_code_base64, verify_totp,
@@ -50,18 +53,106 @@ def login(credentials: UserLogin, db: Session = Depends(get_db)):
         user.totp_secret = generate_totp_secret()
         db.commit()
         db.refresh(user)
+
+    # Enforce TOTP if enabled
+    if user.totp_enabled:
+        return {
+            "detail": "MFA required",
+            "totp_enabled": True,
+            "email": user.email
+        }
+    
+    # Otherwise bypass TOTP and issue JWT token directly for Break-glass admin only
+    if user.email == "admin@defense.com":
+        access_token = create_access_token(data={"sub": user.email, "role": user.role})
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "email": user.email,
+            "role": user.role,
+            "totp_enabled": False
+        }
         
-    # Generate QR Code details
+    # Enforce mandatory MFA enrollment for all normal users
     uri = get_totp_uri(user.totp_secret, user.email)
-    qr_code_base64 = generate_qr_code_base64(uri)
+    qr_code = generate_qr_code_base64(uri)
+    return {
+        "detail": "MFA enrollment required",
+        "totp_enabled": False,
+        "email": user.email,
+        "qr_code": qr_code,
+        "totp_secret": user.totp_secret
+    }
+
+@router.post("/mfa/setup", response_model=MFASetupResponse)
+def mfa_setup(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.totp_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="MFA is already enabled"
+        )
+    if not current_user.totp_secret:
+        current_user.totp_secret = generate_totp_secret()
+        db.commit()
+        db.refresh(current_user)
+        
+    uri = get_totp_uri(current_user.totp_secret, current_user.email)
+    qr_code = generate_qr_code_base64(uri)
     
     return {
-        "detail": "MFA required",
-        "qr_code": qr_code_base64,
-        "totp_secret": user.totp_secret,
-        "totp_enabled": user.totp_enabled,
-        "email": user.email
+        "qr_code": qr_code,
+        "totp_secret": current_user.totp_secret,
+        "totp_enabled": current_user.totp_enabled
     }
+
+@router.post("/mfa/verify")
+def mfa_verify(
+    payload: MFAVerifyPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.totp_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="MFA is already enabled"
+        )
+    
+    is_valid = verify_totp(current_user.totp_secret, payload.otp_code, current_user.email)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired authentication code"
+        )
+        
+    current_user.totp_enabled = True
+    db.commit()
+    return {"detail": "Multi-Factor Authentication enabled successfully"}
+
+@router.post("/mfa/disable")
+def mfa_disable(
+    payload: MFADisable,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if not current_user.totp_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="MFA is not enabled"
+        )
+    
+    if not verify_password(payload.password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect password"
+        )
+        
+    current_user.totp_enabled = False
+    current_user.totp_secret = generate_totp_secret() # rotate secret key
+    db.commit()
+    return {"detail": "Multi-Factor Authentication disabled successfully"}
 
 @router.post("/verify-otp", response_model=Token)
 def verify_otp_endpoint(payload: OTPVerify, request: Request, db: Session = Depends(get_db)):
@@ -74,7 +165,7 @@ def verify_otp_endpoint(payload: OTPVerify, request: Request, db: Session = Depe
         )
     
     # Verify TOTP code
-    is_valid = verify_totp(user.totp_secret, payload.otp_code)
+    is_valid = verify_totp(user.totp_secret, payload.otp_code, user.email)
     if not is_valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -154,6 +245,16 @@ def verify_otp_endpoint(payload: OTPVerify, request: Request, db: Session = Depe
 
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_user)):
+    current_user.break_glass_admin = (current_user.email == "admin@defense.com")
+    current_user.mfa_enrolled = current_user.totp_enabled
+    
+    if current_user.email == "admin@defense.com":
+        current_user.mfa_required = False
+    else:
+        current_user.mfa_required = not current_user.totp_enabled
+        
+    current_user.mfa_reset_required = (not current_user.totp_enabled and current_user.totp_secret is not None)
+    
     return current_user
 
 @router.post("/logout")

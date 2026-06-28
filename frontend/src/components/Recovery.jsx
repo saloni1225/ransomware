@@ -68,16 +68,30 @@ function StatusBadge({ status }) {
     pending:     { color: '#6366f1', bg: 'rgba(99,102,241,0.1)', label: 'Pending' },
     rollback:    { color: '#8b5cf6', bg: 'rgba(139,92,246,0.1)', label: 'Rollback' },
     delete_permanent: { color: '#ef4444', bg: 'rgba(239,68,68,0.1)', label: 'Deleted' },
+    queued:      { color: '#3b82f6', bg: 'rgba(59,130,246,0.1)', label: 'Queued' },
+    sent:        { color: '#06b6d4', bg: 'rgba(6,182,212,0.1)', label: 'Sent to Agent' },
+    received:    { color: '#a78bfa', bg: 'rgba(167,139,250,0.1)', label: 'Received' },
+    started:     { color: '#6366f1', bg: 'rgba(99,102,241,0.1)', label: 'Running...' },
+    running:     { color: '#6366f1', bg: 'rgba(99,102,241,0.1)', label: 'Running...' },
   };
   const s = map[status] || map.pending;
+  const isProgress = ['queued', 'sent', 'received', 'started', 'running'].includes(status);
   return (
     <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: '5px',
+      display: 'inline-flex', alignItems: 'center', gap: '6px',
       padding: '3px 10px', borderRadius: '20px',
       background: s.bg, color: s.color,
       fontSize: '11px', fontWeight: 700, letterSpacing: '0.04em',
       textTransform: 'uppercase',
     }}>
+      {isProgress && (
+        <span style={{
+          width: '6px', height: '6px', borderRadius: '50%',
+          background: s.color,
+          boxShadow: `0 0 6px ${s.color}`,
+          animation: 'pulse 1.5s infinite',
+        }} />
+      )}
       {s.label}
     </span>
   );
@@ -99,8 +113,8 @@ export default function Recovery() {
     setTimeout(() => setToast(null), 3500);
   };
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [statsData, quarantinedData, historyData] = await Promise.all([
         api.getRecoveryStats(),
@@ -111,13 +125,30 @@ export default function Recovery() {
       setQuarantined(quarantinedData);
       setHistory(historyData);
     } catch (err) {
-      showToast('Failed to load recovery data', 'error');
+      if (!silent) showToast('Failed to load recovery data', 'error');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    const activeStatuses = ['queued', 'sent', 'received', 'started', 'running', 'pending', 'restore_pending', 'quarantine_pending'];
+    const hasActive =
+      quarantined.some(item => activeStatuses.includes(item.status)) ||
+      history.some(item => activeStatuses.includes(item.status));
+
+    if (!hasActive) return;
+
+    const interval = setInterval(() => {
+      load(true);
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [quarantined, history, load]);
 
   const handleRestore = async (scanId, filePath) => {
     setConfirmModal({

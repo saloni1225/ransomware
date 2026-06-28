@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import MalwareScan, RecoveryAction, ThreatEvent
+from app.models import MalwareScan, RecoveryAction, ThreatEvent, AgentCommand
 from app.services.auth_service import get_current_user
 
 router = APIRouter(prefix="/recovery", tags=["Recovery"])
@@ -72,15 +72,27 @@ def list_quarantined_files(
     current_user=Depends(get_current_user),
 ):
     """
-    Return all malware scan records with status 'quarantined'.
-    These are files awaiting a restore or delete decision.
+    Return all malware scan records with status 'quarantined', 'quarantine_pending', or 'restore_pending'.
+    These are files awaiting or in-progress of a restore or delete decision.
     """
     scans = (
         db.query(MalwareScan)
-        .filter(MalwareScan.status == "quarantined")
+        .filter(MalwareScan.status.in_(["quarantined", "quarantine_pending", "restore_pending"]))
         .order_by(MalwareScan.scan_time.desc())
         .all()
     )
+    # Dynamically resolve status if in intermediate state
+    for scan in scans:
+        if scan.status in ("quarantine_pending", "restore_pending"):
+            cmd_type = "quarantine_file" if scan.status == "quarantine_pending" else "restore_file"
+            cmd = (
+                db.query(AgentCommand)
+                .filter(AgentCommand.device_id == scan.device_id, AgentCommand.command_type == cmd_type)
+                .order_by(AgentCommand.created_at.desc())
+                .first()
+            )
+            if cmd and cmd.payload and cmd.payload.get("scan_id") == scan.id:
+                scan.status = cmd.status
     return scans
 
 
@@ -104,8 +116,8 @@ def restore_file(
             detail=f"File is not quarantined (current status: {scan.status}). Cannot restore."
         )
 
-    # Update scan status back to clean
-    scan.status = "restored"
+    # Update scan status to restore_pending
+    scan.status = "restore_pending"
     db.commit()
 
     # Log the recovery action
@@ -115,11 +127,20 @@ def restore_file(
         action_type="restore",
         file_path=scan.file_path,
         performed_by=current_user.email,
-        status="success",
-        notes=body.notes or f"File restored by {current_user.email}",
+        status="pending",
+        notes=body.notes or f"Restore requested by {current_user.email}",
         timestamp=datetime.datetime.utcnow(),
     )
     db.add(action)
+    
+    # Queue Agent Command
+    cmd = AgentCommand(
+        device_id=scan.device_id,
+        command_type="restore_file",
+        payload={"scan_id": scan.id, "file_path": scan.file_path},
+        status="queued"
+    )
+    db.add(cmd)
     db.commit()
     db.refresh(action)
     return action
@@ -174,19 +195,27 @@ def rollback_threat_event(
         raise HTTPException(status_code=404, detail="Threat event not found")
 
     previous_status = event.status
-    event.status = "resolved"
-    db.commit()
-
+    
+    # Log Recovery Action with pending status
     action = RecoveryAction(
         threat_event_id=event_id,
         device_id=event.device_id,
         action_type="rollback",
         performed_by=current_user.email,
-        status="success",
-        notes=body.notes or f"Event rolled back from '{previous_status}' by {current_user.email}",
+        status="pending",
+        notes=body.notes or f"Event rollback requested from '{previous_status}' by {current_user.email}",
         timestamp=datetime.datetime.utcnow(),
     )
     db.add(action)
+    
+    # Queue Agent Command
+    cmd = AgentCommand(
+        device_id=event.device_id,
+        command_type="rollback",
+        payload={"threat_event_id": event.id},
+        status="queued"
+    )
+    db.add(cmd)
     db.commit()
     db.refresh(action)
     return action
@@ -200,7 +229,7 @@ def get_recovery_history(
     current_user=Depends(get_current_user),
 ):
     """
-    Return paginated recovery action history (most recent first).
+    Return paginated recovery action history (most recent first), dynamically mapping intermediate command states.
     """
     actions = (
         db.query(RecoveryAction)
@@ -209,6 +238,36 @@ def get_recovery_history(
         .limit(limit)
         .all()
     )
+    # Dynamically resolve pending status if there is an active command
+    for action in actions:
+        if action.status == "pending":
+            if action.action_type == "restore" and action.scan_id:
+                cmd = (
+                    db.query(AgentCommand)
+                    .filter(AgentCommand.device_id == action.device_id, AgentCommand.command_type == "restore_file")
+                    .order_by(AgentCommand.created_at.desc())
+                    .first()
+                )
+                if cmd and cmd.payload and cmd.payload.get("scan_id") == action.scan_id:
+                    action.status = cmd.status
+            elif action.action_type == "rollback" and action.threat_event_id:
+                cmd = (
+                    db.query(AgentCommand)
+                    .filter(AgentCommand.device_id == action.device_id, AgentCommand.command_type == "rollback")
+                    .order_by(AgentCommand.created_at.desc())
+                    .first()
+                )
+                if cmd and cmd.payload and cmd.payload.get("threat_event_id") == action.threat_event_id:
+                    action.status = cmd.status
+            elif action.action_type == "quarantine_confirm" and action.scan_id:
+                cmd = (
+                    db.query(AgentCommand)
+                    .filter(AgentCommand.device_id == action.device_id, AgentCommand.command_type == "quarantine_file")
+                    .order_by(AgentCommand.created_at.desc())
+                    .first()
+                )
+                if cmd and cmd.payload and cmd.payload.get("scan_id") == action.scan_id:
+                    action.status = cmd.status
     return actions
 
 
