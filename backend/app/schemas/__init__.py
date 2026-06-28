@@ -3,5 +3,7 @@ from app.schemas.schemas import (
     OTPVerify, DeviceCreate, DeviceHeartbeat, DeviceResponse,
     ThreatLogCreate, ThreatLogBatch, ThreatLogResponse, ThreatEventCreate, ThreatEventResponse,
     AIExplanationResponse, AttackStorylineResponse, DashboardSummary,
-    ForgotPassword, ResetPassword, UserRoleUpdate
+    ForgotPassword, ResetPassword, UserRoleUpdate,
+    MFASetupResponse, MFADisable, MFAVerifyPayload,
+    AgentCommandCreate, AgentCommandStatusUpdate, AgentCommandResponse
 )

@@ -103,6 +103,44 @@ export const api = {
     return response.json();
   },
 
+  mfaSetup: async () => {
+    const response = await fetch(`${API_BASE_URL}/auth/mfa/setup`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || 'Failed to set up MFA');
+    }
+    return response.json();
+  },
+
+  mfaVerify: async (otpCode) => {
+    const response = await fetch(`${API_BASE_URL}/auth/mfa/verify`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ otp_code: otpCode }),
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || 'MFA verification failed');
+    }
+    return response.json();
+  },
+
+  mfaDisable: async (password) => {
+    const response = await fetch(`${API_BASE_URL}/auth/mfa/disable`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ password }),
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || 'Failed to disable MFA');
+    }
+    return response.json();
+  },
+
   // Devices
   listDevices: async () => {
     const response = await fetch(`${API_BASE_URL}/devices/`, {
@@ -330,6 +368,14 @@ export const api = {
       method: 'PUT', headers: getHeaders(),
     });
     if (!response.ok) throw new Error('Failed to toggle asset');
+    return response.json();
+  },
+
+  deleteDeceptionAsset: async (assetId) => {
+    const response = await fetch(`${API_BASE_URL}/deception/assets/${assetId}`, {
+      method: 'DELETE', headers: getHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to delete deception asset');
     return response.json();
   },
 

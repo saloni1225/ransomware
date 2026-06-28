@@ -1,11 +1,15 @@
 import datetime
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
-from app.models import Device, ThreatEvent
-from app.schemas import DeviceCreate, DeviceHeartbeat, DeviceResponse
+from app.models import Device, ThreatEvent, AgentCommand, MalwareScan, RecoveryAction
+from app.schemas import (
+    DeviceCreate, DeviceHeartbeat, DeviceResponse,
+    AgentCommandCreate, AgentCommandStatusUpdate, AgentCommandResponse
+)
 from app.services.auth_service import get_current_user
+from app.config import settings
 
 router = APIRouter(prefix="/devices", tags=["Devices"])
 
@@ -121,4 +125,150 @@ def delete_device(device_id: str, db: Session = Depends(get_db), current_user = 
     db.delete(device)
     db.commit()
     return {"detail": "Device deleted successfully"}
+
+
+# ── Agent Command APIs ───────────────────────────────────────────────────────
+
+def verify_agent_secret(x_agent_secret: str = Header(None)):
+    expected = getattr(settings, "AGENT_SHARED_SECRET", "shieldcore_secure_secret_token_2026")
+    if not x_agent_secret or x_agent_secret != expected:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing agent secret header"
+        )
+
+@router.post("/{device_id}/commands", response_model=AgentCommandResponse)
+def queue_agent_command(
+    device_id: str,
+    command_in: AgentCommandCreate,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Queue a new control/remediation command for an agent."""
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+        
+    cmd = AgentCommand(
+        device_id=device_id,
+        command_type=command_in.command_type,
+        payload=command_in.payload,
+        status="queued"
+    )
+    db.add(cmd)
+    db.commit()
+    db.refresh(cmd)
+    return cmd
+
+@router.get("/{device_id}/commands", response_model=List[AgentCommandResponse])
+def list_agent_commands(
+    device_id: str,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Retrieve full history of commands dispatched to a device."""
+    return db.query(AgentCommand).filter(AgentCommand.device_id == device_id).order_by(AgentCommand.created_at.desc()).all()
+
+@router.get("/{device_id}/commands/pending", response_model=List[AgentCommandResponse])
+def get_pending_agent_commands(
+    device_id: str,
+    db: Session = Depends(get_db),
+    _agent_secret = Depends(verify_agent_secret)
+):
+    """Polled by the local agent to fetch commands waiting for execution."""
+    cmds = (
+        db.query(AgentCommand)
+        .filter(
+            AgentCommand.device_id == device_id,
+            AgentCommand.status.in_(["queued", "sent"])
+        )
+        .order_by(AgentCommand.created_at.asc())
+        .all()
+    )
+    # Mark queued as sent when fetched by the agent
+    for cmd in cmds:
+        if cmd.status == "queued":
+            cmd.status = "sent"
+    db.commit()
+    return cmds
+
+@router.put("/{device_id}/commands/{command_id}/status", response_model=AgentCommandResponse)
+def update_agent_command_status(
+    device_id: str,
+    command_id: int,
+    status_update: AgentCommandStatusUpdate,
+    db: Session = Depends(get_db),
+    _agent_secret = Depends(verify_agent_secret)
+):
+    """Updated by the agent to report progress, completion, or failures."""
+    cmd = db.query(AgentCommand).filter(
+        AgentCommand.id == command_id,
+        AgentCommand.device_id == device_id
+    ).first()
+    if not cmd:
+        raise HTTPException(status_code=404, detail="Command not found")
+        
+    cmd.status = status_update.status
+    if status_update.execution_result is not None:
+        cmd.execution_result = status_update.execution_result
+    if status_update.error_message is not None:
+        cmd.error_message = status_update.error_message
+        
+    # Wire command completion back to MalwareScan and RecoveryAction
+    if status_update.status == "completed":
+        if cmd.command_type == "restore_file" and cmd.payload:
+            scan_id = cmd.payload.get("scan_id")
+            if scan_id:
+                scan = db.query(MalwareScan).filter(MalwareScan.id == scan_id).first()
+                if scan:
+                    scan.status = "restored"
+                action = db.query(RecoveryAction).filter(RecoveryAction.scan_id == scan_id, RecoveryAction.action_type == "restore").first()
+                if action:
+                    action.status = "success"
+                    
+        elif cmd.command_type == "quarantine_file" and cmd.payload:
+            scan_id = cmd.payload.get("scan_id")
+            if scan_id:
+                scan = db.query(MalwareScan).filter(MalwareScan.id == scan_id).first()
+                if scan:
+                    scan.status = "quarantined"
+                action = db.query(RecoveryAction).filter(RecoveryAction.scan_id == scan_id, RecoveryAction.action_type == "quarantine_confirm").first()
+                if action:
+                    action.status = "success"
+                    
+        elif (cmd.command_type == "rollback" or cmd.command_type == "acknowledge_alert" or cmd.command_type == "terminate_process") and cmd.payload:
+            event_id = cmd.payload.get("threat_event_id")
+            if event_id:
+                event = db.query(ThreatEvent).filter(ThreatEvent.id == event_id).first()
+                if event:
+                    event.status = "resolved"
+                action = db.query(RecoveryAction).filter(RecoveryAction.threat_event_id == event_id, RecoveryAction.action_type == "rollback").first()
+                if action:
+                    action.status = "success"
+                    
+    elif status_update.status == "failed":
+        if cmd.command_type == "restore_file" and cmd.payload:
+            scan_id = cmd.payload.get("scan_id")
+            if scan_id:
+                scan = db.query(MalwareScan).filter(MalwareScan.id == scan_id).first()
+                if scan:
+                    scan.status = "quarantined"
+                action = db.query(RecoveryAction).filter(RecoveryAction.scan_id == scan_id, RecoveryAction.action_type == "restore").first()
+                if action:
+                    action.status = "failed"
+                    action.notes = f"Agent execution failed: {status_update.error_message}"
+        elif cmd.command_type == "quarantine_file" and cmd.payload:
+            scan_id = cmd.payload.get("scan_id")
+            if scan_id:
+                scan = db.query(MalwareScan).filter(MalwareScan.id == scan_id).first()
+                if scan:
+                    scan.status = "infected"
+                action = db.query(RecoveryAction).filter(RecoveryAction.scan_id == scan_id, RecoveryAction.action_type == "quarantine_confirm").first()
+                if action:
+                    action.status = "failed"
+                    action.notes = f"Agent execution failed: {status_update.error_message}"
+                    
+    db.commit()
+    db.refresh(cmd)
+    return cmd
 

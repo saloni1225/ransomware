@@ -51,6 +51,7 @@ from network_monitor.collector import start_network_collector
 from wifi_scanner.scanner import start_wifi_scanner
 from deception_engine.file_placer import start_deception_engine
 from ransomware_detection.detector import start_ransomware_detector
+from command_processor import start_command_processor
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -138,6 +139,13 @@ def main():
         components.append(("RansomwareDetector", ransom_detector))
     except Exception as exc:
         logger.error("Ransomware detector failed to start: %s", exc)
+
+    try:
+        logger.info("Starting Remote Command Processor …")
+        cmd_thread, cmd_stop_event = start_command_processor()
+        components.append(("CommandProcessor", cmd_stop_event))
+    except Exception as exc:
+        logger.error("Command processor failed to start: %s", exc)
 
     logger.info("All agent modules started.  Press Ctrl+C to stop.")
 

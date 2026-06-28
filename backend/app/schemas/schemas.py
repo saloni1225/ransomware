@@ -27,6 +27,11 @@ class UserResponse(UserBase):
     role: str
     is_active: bool
     created_at: datetime
+    totp_enabled: bool
+    break_glass_admin: bool = False
+    mfa_required: bool = False
+    mfa_enrolled: bool = False
+    mfa_reset_required: bool = False
 
     class Config:
         from_attributes = True
@@ -146,3 +151,41 @@ class ResetPassword(BaseModel):
 
 class UserRoleUpdate(BaseModel):
     role: str
+
+class MFASetupResponse(BaseModel):
+    qr_code: str
+    totp_secret: str
+    totp_enabled: bool
+
+class MFADisable(BaseModel):
+    password: str
+
+class MFAVerifyPayload(BaseModel):
+    otp_code: str
+
+
+# Agent Command Schemas
+class AgentCommandCreate(BaseModel):
+    command_type: str
+    payload: Optional[dict] = None
+
+class AgentCommandStatusUpdate(BaseModel):
+    status: str  # 'received', 'started', 'completed', 'failed'
+    execution_result: Optional[dict] = None
+    error_message: Optional[str] = None
+
+class AgentCommandResponse(BaseModel):
+    id: int
+    device_id: str
+    command_type: str
+    payload: Optional[dict] = None
+    status: str
+    execution_result: Optional[dict] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+

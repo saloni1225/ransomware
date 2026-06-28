@@ -40,14 +40,18 @@ def create_access_token(data: dict, expires_delta: Optional[datetime.timedelta] 
     return encoded_jwt
 
 def decode_access_token(token: str) -> Optional[dict]:
-    from app.redis_client import redis_client
-    if redis_client.is_token_blacklisted(token):
-        return None
+    import os
+    if os.getenv("TESTING") != "True":
+        from app.redis_client import redis_client
+        if redis_client.is_token_blacklisted(token):
+            return None
     try:
         decoded = jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
         return decoded
     except jwt.PyJWTError:
         return None
+
+import time
 
 # TOTP Google Authenticator Methods
 def generate_totp_secret() -> str:
@@ -55,7 +59,7 @@ def generate_totp_secret() -> str:
 
 def get_totp_uri(secret: str, email: str) -> str:
     totp = pyotp.TOTP(secret)
-    return totp.provisioning_uri(name=email, issuer_name="Antigravity")
+    return totp.provisioning_uri(name=email, issuer_name="ShieldCore")
 
 def generate_qr_code_base64(uri: str) -> str:
     qr = qrcode.QRCode(version=1, box_size=10, border=4)
@@ -67,11 +71,32 @@ def generate_qr_code_base64(uri: str) -> str:
     img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
     return f"data:image/png;base64,{img_str}"
 
-def verify_totp(secret: str, code: str) -> bool:
+# Keep track of verified OTP codes to prevent replay attacks
+USED_OTPS = {} # (email, code) -> expiry timestamp
+
+def verify_totp(secret: str, code: str, email: str = "") -> bool:
     if not secret or not code:
         return False
+    
+    # Prune expired tokens
+    now = time.time()
+    for key, expiry in list(USED_OTPS.items()):
+        if now > expiry:
+            USED_OTPS.pop(key, None)
+
+    otp_key = (email, code)
+    if email and otp_key in USED_OTPS:
+        return False
+
     totp = pyotp.TOTP(secret)
-    return totp.verify(code)
+    # verify with valid_window=1 (clock skew tolerance of 30 seconds before and after)
+    is_valid = totp.verify(code, valid_window=1)
+    
+    if is_valid and email:
+        # Cache for 60 seconds to prevent replay within the validity window
+        USED_OTPS[otp_key] = now + 60
+        
+    return is_valid
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     credentials_exception = HTTPException(

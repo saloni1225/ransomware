@@ -17,6 +17,7 @@ import DeceptionEngine from './components/DeceptionEngine';
 import PrivacyDashboard from './components/PrivacyDashboard';
 import BrowserProtection from './components/BrowserProtection';
 import Settings from './components/Settings';
+import LandingPage from './components/LandingPage';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(api.isAuthenticated());
@@ -25,6 +26,8 @@ export default function App() {
   const [selectedEventId, setSelectedEventId] = useState(null);
   const [summary, setSummary] = useState(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
+  const [showAuthScreen, setShowAuthScreen] = useState(false);
+  const [isRegisterFromLanding, setIsRegisterFromLanding] = useState(false);
   const pollingRef = useRef(null);
 
   useEffect(() => {
@@ -84,10 +87,27 @@ export default function App() {
     setSummary(null);
     setActiveTab('dashboard');
     setSelectedEventId(null);
+    setShowAuthScreen(false);
   };
 
   if (!isAuthenticated) {
-    return <Auth onAuthSuccess={handleAuthSuccess} />;
+    if (showAuthScreen) {
+      return (
+        <Auth 
+          onAuthSuccess={handleAuthSuccess} 
+          initialIsLogin={!isRegisterFromLanding} 
+          onBackToLanding={() => setShowAuthScreen(false)} 
+        />
+      );
+    }
+    return (
+      <LandingPage 
+        onNavigateToAuth={(isLogin) => {
+          setIsRegisterFromLanding(!isLogin);
+          setShowAuthScreen(true);
+        }} 
+      />
+    );
   }
 
   return (

@@ -72,7 +72,7 @@ function RiskGauge({ score }) {
           }}
         />
         {/* Score/Label Text */}
-        <text x="80" y="70" textAnchor="middle" fill="white" fontSize="28" fontWeight="800" fontFamily="Inter, sans-serif">
+        <text x="80" y="70" textAnchor="middle" fill="var(--text-main)" fontSize="28" fontWeight="800" fontFamily="Inter, sans-serif">
           {score}
         </text>
         <text x="80" y="85" textAnchor="middle" fill={color} fontSize="10" fontWeight="700" letterSpacing="0.08em" fontFamily="Inter, sans-serif">

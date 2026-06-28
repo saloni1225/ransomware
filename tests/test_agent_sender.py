@@ -6,11 +6,9 @@ Uses unittest.mock to avoid real HTTP calls.
 import json
 import os
 import sys
-import threading
-import time
+import tempfile
 import unittest
-from collections import deque
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 # Ensure agent directory is on path
 AGENT_DIR = os.path.join(os.path.dirname(__file__), "..", "agent")
@@ -20,22 +18,33 @@ sys.path.insert(0, AGENT_DIR)
 class TestAgentSender(unittest.TestCase):
     """Unit tests for AgentSender event queuing and batch logic."""
 
-    def _make_sender(self):
-        """Import fresh sender each time to avoid module-level singleton state."""
-        # We need to import inside the test to pick up mocks
-        import importlib
-        import sender as sender_mod
-        importlib.reload(sender_mod)
-        return sender_mod.AgentSender()
+    def setUp(self):
+        # Create a temporary DB file for isolation
+        self.db_file = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.db_path = self.db_file.name
+        self.db_file.close()
+
+    def tearDown(self):
+        if os.path.exists(self.db_path):
+            try:
+                os.remove(self.db_path)
+            except OSError:
+                pass
 
     @patch("sender.requests.Session")
     def test_enqueue_adds_to_queue(self, mock_session_cls):
         mock_session_cls.return_value = MagicMock()
         from sender import AgentSender
+        from offline_db import OfflineDB
+
         s = AgentSender()
+        s._db = OfflineDB(self.db_path)
+
         s.enqueue("file", "modified", {"path": "/tmp/test.txt"})
-        self.assertEqual(len(s._queue), 1)
-        event = s._queue[0]
+        self.assertEqual(s._db.get_count(), 1)
+        batch = s._db.get_batch(1)
+        self.assertEqual(len(batch), 1)
+        event = batch[0]["event"]
         self.assertEqual(event["type"], "file")
         self.assertEqual(event["action"], "modified")
 
@@ -48,13 +57,26 @@ class TestAgentSender(unittest.TestCase):
         mock_session_cls.return_value = mock_session
 
         from sender import AgentSender
+        from offline_db import OfflineDB
+
         s = AgentSender()
+        s._db = OfflineDB(self.db_path)
 
         for i in range(5):
             s.enqueue("file", "created", {"path": f"/tmp/file{i}.txt"})
 
-        s._flush()  # call directly (no threads)
-        self.assertEqual(len(s._queue), 0)
+        self.assertEqual(s._db.get_count(), 5)
+
+        # Retrieve and post batch like the sync loop does
+        batch_items = s._db.get_batch(5)
+        batch_events = [item["event"] for item in batch_items]
+        batch_ids = [item["id"] for item in batch_items]
+
+        success = s._post_batch(batch_events)
+        self.assertTrue(success)
+        s._db.delete_batch(batch_ids)
+
+        self.assertEqual(s._db.get_count(), 0)
 
     @patch("sender.requests.Session")
     def test_failed_post_goes_to_retry_queue(self, mock_session_cls):
@@ -66,78 +88,20 @@ class TestAgentSender(unittest.TestCase):
         mock_session_cls.return_value = mock_session
 
         from sender import AgentSender
+        from offline_db import OfflineDB
+
         s = AgentSender()
+        s._db = OfflineDB(self.db_path)
+
         s.enqueue("usb", "mounted", {"label": "BadDrive", "authorized": False})
-        s._flush()
-        # Event should be moved to retry queue
-        self.assertEqual(len(s._retry_queue), 1)
-
-    @patch("sender.requests.Session")
-    def test_offline_buffer_written_on_failure(self, mock_session_cls):
-        import tempfile
-        mock_resp = MagicMock()
-        mock_resp.status_code = 503
-        mock_resp.text = "Unavailable"
-        mock_session = MagicMock()
-        mock_session.post.return_value = mock_resp
-        mock_session_cls.return_value = mock_session
-
-        import config as agent_config
-        tmp_buf = tempfile.mktemp(suffix=".jsonl")
-        original = agent_config.OFFLINE_BUFFER_PATH
-        agent_config.OFFLINE_BUFFER_PATH = tmp_buf
-
-        try:
-            from sender import AgentSender
-            s = AgentSender()
-            s.enqueue("process", "started", {"name": "test.exe"})
-            s._flush()
-
-            self.assertTrue(os.path.exists(tmp_buf))
-            with open(tmp_buf) as f:
-                lines = [l.strip() for l in f if l.strip()]
-            self.assertGreaterEqual(len(lines), 1)
-            event = json.loads(lines[0])
-            self.assertEqual(event["type"], "process")
-        finally:
-            agent_config.OFFLINE_BUFFER_PATH = original
-            if os.path.exists(tmp_buf):
-                os.remove(tmp_buf)
-
-    @patch("sender.requests.Session")
-    def test_offline_buffer_replayed_on_start(self, mock_session_cls):
-        import tempfile
-        import config as agent_config
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 201
-        mock_session = MagicMock()
-        mock_session.post.return_value = mock_resp
-        mock_session_cls.return_value = mock_session
-
-        tmp_buf = tempfile.mktemp(suffix=".jsonl")
-        agent_config.OFFLINE_BUFFER_PATH = tmp_buf
-
-        # Pre-populate buffer
-        buffered = {
-            "device_id": "test-host",
-            "type": "file",
-            "action": "modified",
-            "details": {"path": "/tmp/a.txt"},
-        }
-        with open(tmp_buf, "w") as f:
-            f.write(json.dumps(buffered) + "\n")
-
-        try:
-            from sender import AgentSender
-            s = AgentSender()
-            s._replay_offline_buffer()
-            # Buffer should be deleted after successful replay
-            self.assertFalse(os.path.exists(tmp_buf))
-        finally:
-            agent_config.OFFLINE_BUFFER_PATH = original if 'original' in dir() else tmp_buf
-            if os.path.exists(tmp_buf):
-                os.remove(tmp_buf)
+        
+        batch_items = s._db.get_batch(1)
+        batch_events = [item["event"] for item in batch_items]
+        
+        success = s._post_batch(batch_events)
+        self.assertFalse(success)
+        # Event should remain in offline db for retry on subsequent loops
+        self.assertEqual(s._db.get_count(), 1)
 
 
 class TestBatchEndpointFallback(unittest.TestCase):
@@ -158,6 +122,7 @@ class TestBatchEndpointFallback(unittest.TestCase):
         mock_session_cls.return_value = mock_session
 
         from sender import AgentSender
+        
         s = AgentSender()
         result = s._post_batch([
             {"device_id": "h", "type": "file", "action": "created", "details": {}},

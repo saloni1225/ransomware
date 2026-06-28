@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     WEBHOOK_URL: str = ""
+    AGENT_SHARED_SECRET: str = "shieldcore_secure_secret_token_2026"
 
     class Config:
         env_file = ".env"
