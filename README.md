@@ -247,7 +247,7 @@ Analyzes historical events and threat trends to estimate future risk levels.
 
 ---
 
-# 📊 Dashboard Modules
+#  Dashboard Modules
 
 ### System Health
 
@@ -318,7 +318,7 @@ Dashboard Notification
 
 ---
 
-# 🚀 Installation
+# Installation
 
 ## Clone Repository
 
@@ -396,7 +396,7 @@ The simulator generates controlled ransomware-like behavior for demonstrating de
 
 ---
 
-# 📜 License
+# License
 
 This project is developed for academic and research purposes.
 
